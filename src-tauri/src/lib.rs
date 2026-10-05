@@ -358,6 +358,14 @@ fn show_settings(app: &AppHandle) {
     show_window(app, Window::Settings);
 }
 
+fn autostart_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
+    let builder = tauri_plugin_autostart::Builder::new();
+    // `macos_launcher` istnieje tylko w kompilacji na macOS.
+    #[cfg(target_os = "macos")]
+    let builder = builder.macos_launcher(tauri_plugin_autostart::MacosLauncher::LaunchAgent);
+    builder.build()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let _ = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info,ort=warn,whisper_rs=warn,transcribe_rs=warn")).try_init();
@@ -375,7 +383,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         // Autostart: macOS przez LaunchAgent (bez zgody „Elementy logowania” dla każdej wersji),
         // Windows przez rejestr Run, Linux przez ~/.config/autostart.
-        .plugin(tauri_plugin_autostart::Builder::new().macos_launcher(tauri_plugin_autostart::MacosLauncher::LaunchAgent).build())
+        .plugin(autostart_plugin())
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState {
             settings: Mutex::new(settings),
