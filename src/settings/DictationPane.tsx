@@ -1,5 +1,35 @@
+import { useEffect, useState } from "react";
 import type { PaneProps } from "./SettingsApp";
+import { api } from "../api";
 import { ENGINE_LABELS, type EngineId, type Language, type PasteMode } from "../api";
+
+function AutostartToggle() {
+  const [on, setOn] = useState<boolean | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    api.autostartEnabled().then(setOn);
+  }, []);
+  return (
+    <>
+      <label>
+        <input
+          type="checkbox"
+          checked={!!on}
+          disabled={on === null}
+          onChange={(e) => {
+            const v = e.target.checked;
+            api
+              .setAutostart(v)
+              .then(() => setOn(v))
+              .catch((err) => setError(String(err)));
+          }}
+        />
+        Uruchamiaj Dyktando X po zalogowaniu
+      </label>
+      {error && <div className="error">{error}</div>}
+    </>
+  );
+}
 
 export default function DictationPane({ settings, update }: PaneProps) {
   return (
@@ -23,7 +53,7 @@ export default function DictationPane({ settings, update }: PaneProps) {
           <option value="en">Angielski</option>
           <option value="auto">Automatycznie</option>
         </select>
-        <p className="hint">Parakeet zawsze rozpoznaje język sam; wybór dotyczy Whispera.</p>
+        <p className="hint">Parakeet zawsze rozpoznaje język sam; wybór dotyczy Whispera i Canary (Canary przy „Automatycznie” zakłada polski).</p>
       </div>
       <div className="row">
         <label>Wstawianie tekstu</label>
@@ -39,6 +69,7 @@ export default function DictationPane({ settings, update }: PaneProps) {
           <input type="checkbox" checked={settings.hud_enabled} onChange={(e) => update({ hud_enabled: e.target.checked })} />
           Pokazuj dymek ze stanem nagrywania
         </label>
+        <AutostartToggle />
       </div>
       <h2>Polecenia w trakcie dyktowania</h2>
       <table className="commands">

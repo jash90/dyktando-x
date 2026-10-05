@@ -40,6 +40,32 @@
       "minimumSystemVersion": "13.0",
       "entitlements": "./Entitlements.plist",
       "hardenedRuntime": true
+    },
+    "linux": {
+      "deb": {
+        "files": {
+          "/usr/lib/udev/rules.d/70-dyktando-x.rules": "linux/70-dyktando-x.rules"
+        },
+        "postInstallScript": "linux/postinst.sh",
+        "depends": [
+          "pulseaudio-utils"
+        ],
+        "recommends": [
+          "wl-clipboard",
+          "wtype",
+          "ydotool"
+        ],
+        "section": "utils"
+      },
+      "rpm": {
+        "files": {
+          "/usr/lib/udev/rules.d/70-dyktando-x.rules": "linux/70-dyktando-x.rules"
+        },
+        "postInstallScript": "linux/postinst.sh",
+        "depends": [
+          "pulseaudio-utils"
+        ]
+      }
     }
   }
 }

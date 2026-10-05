@@ -301,6 +301,19 @@ fn start_background(app: &AppHandle) {
     });
 }
 
+#[tauri::command]
+fn autostart_enabled(app: AppHandle) -> bool {
+    use tauri_plugin_autostart::ManagerExt;
+    app.autolaunch().is_enabled().unwrap_or(false)
+}
+
+#[tauri::command]
+fn set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
+    use tauri_plugin_autostart::ManagerExt;
+    let al = app.autolaunch();
+    if enabled { al.enable() } else { al.disable() }.map_err(|e| e.to_string())
+}
+
 /// Ponowna rejestracja skrótów — np. po nadaniu uprawnień.
 #[tauri::command]
 fn reload_hotkeys(app: AppHandle) -> Vec<String> {
@@ -360,6 +373,9 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_opener::init())
+        // Autostart: macOS przez LaunchAgent (bez zgody „Elementy logowania” dla każdej wersji),
+        // Windows przez rejestr Run, Linux przez ~/.config/autostart.
+        .plugin(tauri_plugin_autostart::Builder::new().macos_launcher(tauri_plugin_autostart::MacosLauncher::LaunchAgent).build())
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState {
             settings: Mutex::new(settings),
@@ -402,6 +418,8 @@ pub fn run() {
             commands::ai_key_status,
             commands::import_legacy_keys,
             commands::prompt_answer,
+            autostart_enabled,
+            set_autostart,
             open_meetings,
         ])
         .setup(|app| {

@@ -13,12 +13,13 @@ use crate::paths;
 #[serde(rename_all = "snake_case")]
 pub enum EngineId {
     ParakeetV3,
+    CanaryV2,
     WhisperTurbo,
     WhisperLargeV3,
 }
 
 impl EngineId {
-    pub const ALL: [EngineId; 3] = [Self::ParakeetV3, Self::WhisperTurbo, Self::WhisperLargeV3];
+    pub const ALL: [EngineId; 4] = [Self::ParakeetV3, Self::CanaryV2, Self::WhisperTurbo, Self::WhisperLargeV3];
 
     pub fn asset(self) -> &'static Asset {
         asset(AssetId::Engine(self))
@@ -59,6 +60,16 @@ macro_rules! parakeet {
     };
 }
 
+macro_rules! canary {
+    ($f:literal, $size:expr) => {
+        RemoteFile {
+            url: concat!("https://huggingface.co/istupakov/canary-1b-v2-onnx/resolve/main/", $f),
+            name: $f,
+            size: $size,
+        }
+    };
+}
+
 pub static ASSETS: &[Asset] = &[
     Asset {
         id: AssetId::Engine(EngineId::ParakeetV3),
@@ -70,6 +81,19 @@ pub static ASSETS: &[Asset] = &[
             parakeet!("decoder_joint-model.int8.onnx", 18_202_004),
             parakeet!("nemo128.onnx", 139_764),
             parakeet!("vocab.txt", 93_939),
+        ],
+    },
+    Asset {
+        id: AssetId::Engine(EngineId::CanaryV2),
+        dir: "canary-1b-v2-int8",
+        title: "Canary 1B v2",
+        description: "NVIDIA, 25 języków, sam stawia interpunkcję i zapisuje liczby cyframi. Wolniejszy od Parakeeta.",
+        files: &[
+            canary!("encoder-model.int8.onnx", 859_078_138),
+            canary!("decoder-model.int8.onnx", 170_040_374),
+            canary!("vocab.txt", 208_022),
+            // Ten sam preprocesor 128 mel co Parakeet (repo Canary go nie zawiera).
+            parakeet!("nemo128.onnx", 139_764),
         ],
     },
     Asset {

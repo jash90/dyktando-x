@@ -1,6 +1,7 @@
 //! Silniki rozpoznawania mowy: Parakeet v3 (ONNX) i Whisper (whisper.cpp) przez transcribe-rs.
 //! Wejście zawsze 16 kHz mono f32. Instancja nie jest współdzielona między wątkami naraz.
 use anyhow::{anyhow, Result};
+use transcribe_rs::onnx::canary::{CanaryModel, CanaryParams};
 use transcribe_rs::onnx::parakeet::{ParakeetModel, ParakeetParams, TimestampGranularity};
 use transcribe_rs::onnx::Quantization;
 use transcribe_rs::whisper_cpp::{WhisperEngine, WhisperInferenceParams};
@@ -12,6 +13,7 @@ pub const SAMPLE_RATE: u32 = 16_000;
 
 pub enum Engine {
     Parakeet(ParakeetModel),
+    Canary(CanaryModel),
     Whisper(WhisperEngine),
 }
 
@@ -25,6 +27,9 @@ impl Engine {
             EngineId::ParakeetV3 => Engine::Parakeet(
                 ParakeetModel::load(&asset.dir_path(), &Quantization::Int8)
                     .map_err(|e| anyhow!("Nie udało się wczytać Parakeeta: {e}"))?,
+            ),
+            EngineId::CanaryV2 => Engine::Canary(
+                CanaryModel::load(&asset.dir_path(), &Quantization::Int8).map_err(|e| anyhow!("Nie udało się wczytać Canary: {e}"))?,
             ),
             EngineId::WhisperTurbo | EngineId::WhisperLargeV3 => Engine::Whisper(
                 WhisperEngine::load(&asset.file_path(0))
@@ -54,6 +59,11 @@ impl Engine {
                 )
                 .map_err(|e| anyhow!("Parakeet: {e}"))?
                 .text
+            }
+            Engine::Canary(m) => {
+                // Canary nie rozpoznaje języka sam — „automatycznie” traktujemy jak polski.
+                let params = CanaryParams { language: Some(language.code().unwrap_or("pl").to_string()), ..Default::default() };
+                m.transcribe_with(samples, &params).map_err(|e| anyhow!("Canary: {e}"))?.text
             }
             Engine::Whisper(w) => {
                 let params = WhisperInferenceParams {
@@ -122,6 +132,13 @@ mod tests {
     #[ignore]
     fn whisper_turbo_transcribes_polish() {
         check(EngineId::WhisperTurbo);
+    }
+
+    /// ~1 GB: `cargo test -- --ignored canary`.
+    #[test]
+    #[ignore]
+    fn canary_transcribes_polish() {
+        check(EngineId::CanaryV2);
     }
 
     #[test]

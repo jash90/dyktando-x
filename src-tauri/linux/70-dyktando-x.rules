@@ -1,0 +1,5 @@
+# Dyktando X: skróty globalne czytają klawiaturę z /dev/input (działa na X11 i Waylandzie),
+# a blokowanie skrótów i wklejanie przez dotool/ydotool potrzebuje /dev/uinput.
+# „uaccess” daje dostęp tylko zalogowanemu przy komputerze użytkownikowi (nie przez SSH).
+KERNEL=="uinput", TAG+="uaccess"
+SUBSYSTEM=="input", KERNEL=="event*", TAG+="uaccess"

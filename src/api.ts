@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 
-export type EngineId = "parakeet_v3" | "whisper_turbo" | "whisper_large_v3";
+export type EngineId = "parakeet_v3" | "canary_v2" | "whisper_turbo" | "whisper_large_v3";
 export type Language = "pl" | "en" | "auto";
 export type PasteMode = "auto" | "always" | "clipboard_only";
 export type ProviderId = "openai" | "openrouter" | "anthropic" | "zai";
@@ -79,6 +79,8 @@ export const api = {
   openAccessibilitySettings: () => invoke<string[]>("open_accessibility_settings"),
   reloadHotkeys: () => invoke<string[]>("reload_hotkeys"),
   pauseHotkeys: () => invoke<void>("pause_hotkeys"),
+  autostartEnabled: () => invoke<boolean>("autostart_enabled"),
+  setAutostart: (enabled: boolean) => invoke<void>("set_autostart", { enabled }),
 };
 
 export function formatBytes(n: number): string {
@@ -89,6 +91,7 @@ export function formatBytes(n: number): string {
 
 export const ENGINE_LABELS: Record<EngineId, string> = {
   parakeet_v3: "Parakeet TDT 0.6B v3",
+  canary_v2: "Canary 1B v2",
   whisper_turbo: "Whisper large-v3-turbo",
   whisper_large_v3: "Whisper large-v3",
 };
