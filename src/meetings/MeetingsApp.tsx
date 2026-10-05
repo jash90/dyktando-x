@@ -1,0 +1,319 @@
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
+import { AlertTriangle, Circle, FileText, FolderOpen, Mic, Pencil, Sparkles, Square, Trash2, Wand2, X } from "lucide-react";
+import {
+  aiApi,
+  api,
+  clock,
+  ENGINE_LABELS,
+  meetingsApi,
+  shortDate,
+  STATE_LABELS,
+  type EngineId,
+  type JobEvent,
+  type Meeting,
+  type MeetingDetail,
+  type ProviderInfo,
+  type RecordingStatus,
+  type Settings,
+} from "../api";
+import Markdown from "../components/Markdown";
+
+type Tab = "summary" | "transcript";
+
+export default function MeetingsApp() {
+  const [meetings, setMeetings] = useState<Meeting[]>([]);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [detail, setDetail] = useState<MeetingDetail | null>(null);
+  const [status, setStatus] = useState<RecordingStatus | null>(null);
+  const [job, setJob] = useState<JobEvent | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const refreshList = useCallback(() => meetingsApi.list().then(setMeetings), []);
+  const refreshDetail = useCallback(() => {
+    if (selected) meetingsApi.get(selected).then(setDetail).catch(() => setDetail(null));
+  }, [selected]);
+
+  useEffect(() => {
+    refreshList();
+    meetingsApi.status().then(setStatus);
+    meetingsApi.job().then(setJob);
+    const uns = [
+      listen("meetings-changed", () => {
+        refreshList();
+        meetingsApi.status().then(setStatus);
+      }),
+      listen<RecordingStatus>("meeting-status", (e) => setStatus(e.payload)),
+      listen<JobEvent>("meeting-job", (e) => {
+        setJob(e.payload.finished ? null : e.payload);
+        if (e.payload.finished && e.payload.error && e.payload.error !== "Przerwano") setError(e.payload.error);
+      }),
+    ];
+    return () => uns.forEach((u) => u.then((f) => f()));
+  }, [refreshList]);
+
+  useEffect(() => {
+    if (!selected && meetings.length) setSelected(meetings[0].id);
+  }, [meetings, selected]);
+
+  useEffect(() => {
+    refreshDetail();
+  }, [refreshDetail, meetings]);
+
+  const toggleRecording = async () => {
+    setError(null);
+    try {
+      if (status?.recording) {
+        const m = await meetingsApi.stop();
+        setSelected(m.id);
+      } else {
+        const m = await meetingsApi.start();
+        setSelected(m.id);
+      }
+    } catch (e) {
+      setError(String(e));
+    }
+    meetingsApi.status().then(setStatus);
+    refreshList();
+  };
+
+  return (
+    <div className="layout meetings">
+      <nav className="sidebar meeting-list">
+        <div className="brand">Spotkania</div>
+        <button className={`record ${status?.recording ? "on" : ""}`} onClick={toggleRecording}>
+          {status?.recording ? <Square size={14} fill="currentColor" /> : <Circle size={14} fill="currentColor" />}
+          {status?.recording ? `Zatrzymaj · ${clock(status.seconds)}` : "Nagraj spotkanie"}
+        </button>
+        {status?.recording && status.warning && <div className="hint warn-text">{status.warning}</div>}
+        <div className="list">
+          {meetings.length === 0 && <div className="hint">Brak nagrań. Kliknij „Nagraj spotkanie” albo użyj skrótu z ustawień.</div>}
+          {meetings.map((m) => (
+            <button key={m.id} className={`item ${selected === m.id ? "active" : ""}`} onClick={() => setSelected(m.id)}>
+              <span className="item-title">{m.title || shortDate(m.startedAt)}</span>
+              <span className="item-meta">
+                {m.title ? `${shortDate(m.startedAt)} · ` : ""}
+                {clock(m.durationSeconds)} · <span className={`state state-${m.state}`}>{STATE_LABELS[m.state]}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      </nav>
+      <main className="content">
+        {error && (
+          <div className="banner warn closable">
+            <AlertTriangle size={16} /> <span>{error}</span>
+            <button className="link" onClick={() => setError(null)} aria-label="Zamknij">
+              <X size={14} />
+            </button>
+          </div>
+        )}
+        {detail ? (
+          <Detail detail={detail} job={job?.meeting_id === detail.meeting.id ? job : null} busy={!!job} onError={setError} onChanged={refreshList} />
+        ) : (
+          <div className="empty">
+            <Mic size={40} strokeWidth={1.5} />
+            <p>Nagrywaj spotkania w Meet, Zoom czy Teams: Dyktando X zapisze Twój mikrofon i głosy rozmówców, przepisze je lokalnie i — jeśli chcesz — podsumuje przez AI.</p>
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}
+
+function Detail({
+  detail,
+  job,
+  busy,
+  onError,
+  onChanged,
+}: {
+  detail: MeetingDetail;
+  job: JobEvent | null;
+  busy: boolean;
+  onError: (e: string | null) => void;
+  onChanged: () => void;
+}) {
+  const m = detail.meeting;
+  const [tab, setTab] = useState<Tab>(detail.summaries.length ? "summary" : "transcript");
+  const [providers, setProviders] = useState<ProviderInfo[]>([]);
+  const [engine, setEngine] = useState<EngineId | null>(null);
+  const [provider, setProvider] = useState<string>("");
+  const [editing, setEditing] = useState(false);
+  const [title, setTitle] = useState(m.title ?? "");
+  const [summaryIndex, setSummaryIndex] = useState(0);
+
+  useEffect(() => {
+    api.getSettings().then((s: Settings) => {
+      setEngine((e) => e ?? s.meeting_engine);
+      setProvider((p) => p || s.ai_provider);
+    });
+    aiApi.providers().then(setProviders);
+  }, []);
+
+  useEffect(() => {
+    setTitle(m.title ?? "");
+    setEditing(false);
+    setSummaryIndex(0);
+    setTab(detail.summaries.length ? "summary" : "transcript");
+  }, [m.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const recording = m.state === "recording";
+  const canTranscribe = !m.audioDeleted && !recording && !busy;
+  const canSummarize = !!detail.transcript && !recording && !busy;
+  const summary = detail.summaries[summaryIndex];
+  const providerInfo = useMemo(() => providers.find((p) => p.id === provider), [providers, provider]);
+
+  const run = async (f: () => Promise<void>) => {
+    onError(null);
+    try {
+      await f();
+    } catch (e) {
+      if (String(e) !== "Przerwano") onError(String(e));
+    }
+    onChanged();
+  };
+
+  const copy = () => {
+    const text = tab === "summary" ? summary?.content : detail.transcript;
+    if (text) navigator.clipboard.writeText(text);
+  };
+
+  return (
+    <section className="detail">
+      <header className="detail-head">
+        {editing ? (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              meetingsApi.rename(m.id, title).then(() => {
+                setEditing(false);
+                onChanged();
+              });
+            }}
+          >
+            <input autoFocus value={title} placeholder={shortDate(m.startedAt)} onChange={(e) => setTitle(e.target.value)} />
+            <button type="submit" className="primary">
+              Zapisz
+            </button>
+          </form>
+        ) : (
+          <h1>
+            {m.title || `Spotkanie ${shortDate(m.startedAt)}`}
+            <button className="icon" onClick={() => setEditing(true)} title="Zmień nazwę" aria-label="Zmień nazwę">
+              <Pencil size={14} />
+            </button>
+          </h1>
+        )}
+        <div className="hint">
+          {shortDate(m.startedAt)} · {clock(m.durationSeconds)} · {m.hasSystemAudio ? "mikrofon + rozmówcy" : "tylko mikrofon"}
+          {m.transcriptEngine ? ` · ${m.transcriptEngine}` : ""}
+          {m.audioDeleted ? " · nagranie usunięte (zostaje tekst)" : ""} · <span className={`state state-${m.state}`}>{STATE_LABELS[m.state]}</span>
+        </div>
+        {m.lastError && <div className="error">{m.lastError}</div>}
+      </header>
+
+      <div className="toolbar">
+        <div className="group">
+          <select value={engine ?? ""} onChange={(e) => setEngine(e.target.value as EngineId)} disabled={!canTranscribe}>
+            {(Object.keys(ENGINE_LABELS) as EngineId[]).map((id) => (
+              <option key={id} value={id}>
+                {ENGINE_LABELS[id]}
+              </option>
+            ))}
+          </select>
+          <button disabled={!canTranscribe} onClick={() => run(() => meetingsApi.transcribe(m.id, engine ?? undefined))}>
+            <Wand2 size={14} /> {detail.transcript ? "Przepisz ponownie" : "Przepisz"}
+          </button>
+        </div>
+        <div className="group">
+          <select value={provider} onChange={(e) => setProvider(e.target.value)} disabled={!canSummarize}>
+            {providers.map((p) => (
+              <option key={p.id} value={p.id} disabled={!p.has_key}>
+                {p.name}
+                {p.has_key ? "" : " (brak klucza)"}
+              </option>
+            ))}
+          </select>
+          <button
+            disabled={!canSummarize || !providerInfo?.has_key}
+            title={providerInfo?.has_key ? "" : "Dodaj klucz API w Ustawieniach → AI"}
+            onClick={() => providerInfo && run(() => meetingsApi.summarize(m.id, providerInfo.id))}
+          >
+            <Sparkles size={14} /> Podsumuj
+          </button>
+        </div>
+        <div className="group right">
+          <button className="icon" onClick={() => meetingsApi.reveal(m.id)} title="Pokaż pliki" aria-label="Pokaż pliki">
+            <FolderOpen size={16} />
+          </button>
+          <button
+            className="icon danger"
+            disabled={recording}
+            title="Usuń spotkanie"
+            aria-label="Usuń spotkanie"
+            onClick={() => {
+              if (confirm("Usunąć to spotkanie razem z nagraniem, transkryptem i podsumowaniami?")) run(() => meetingsApi.remove(m.id));
+            }}
+          >
+            <Trash2 size={16} />
+          </button>
+        </div>
+      </div>
+
+      {job && (
+        <div className="job">
+          <div className="progress">
+            <span style={{ width: `${Math.round(job.fraction * 100)}%` }} />
+            <em>
+              {job.step} — {Math.round(job.fraction * 100)}%
+            </em>
+          </div>
+          <button onClick={() => meetingsApi.cancelJob()}>Przerwij</button>
+        </div>
+      )}
+
+      <div className="tabs">
+        <button className={tab === "summary" ? "active" : ""} onClick={() => setTab("summary")}>
+          <Sparkles size={14} /> Podsumowanie {detail.summaries.length > 1 ? `(${detail.summaries.length})` : ""}
+        </button>
+        <button className={tab === "transcript" ? "active" : ""} onClick={() => setTab("transcript")}>
+          <FileText size={14} /> Transkrypt
+        </button>
+        <button className="link right" onClick={copy}>
+          Kopiuj
+        </button>
+      </div>
+
+      <div className="doc">
+        {tab === "summary" &&
+          (summary ? (
+            <>
+              {detail.summaries.length > 1 && (
+                <select value={summaryIndex} onChange={(e) => setSummaryIndex(Number(e.target.value))}>
+                  {detail.summaries.map((s, i) => (
+                    <option key={s.name} value={i}>
+                      {s.name.replace(/\.md$/, "")}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <Markdown text={summary.content} />
+            </>
+          ) : (
+            <p className="hint">
+              {detail.transcript
+                ? "Brak podsumowania. Wybierz dostawcę i kliknij „Podsumuj” — transkrypt zostanie wysłany do wybranego dostawcy AI."
+                : "Najpierw przepisz spotkanie."}
+            </p>
+          ))}
+        {tab === "transcript" &&
+          (detail.transcript ? (
+            <Markdown text={detail.transcript} />
+          ) : (
+            <p className="hint">{recording ? "Trwa nagrywanie…" : "Brak transkryptu. Kliknij „Przepisz”."}</p>
+          ))}
+      </div>
+    </section>
+  );
+}

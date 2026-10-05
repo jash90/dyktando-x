@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="pl">
+  <head>
+    <meta charset="UTF-8" />
+    
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dyktando X</title>
+  </head>
+
+  <body>
+    <div id="root"></div>
+    <script>
+      // Błędy JS trafiają do logu aplikacji (stderr) — w wersji wydanej nie ma narzędzi deweloperskich.
+      (function () {
+        function report(message) {
+          try { window.__TAURI_INTERNALS__.invoke("js_error", { message: String(message), location: location.href }); } catch (e) {}
+        }
+        window.addEventListener("error", function (e) { report((e.message || "") + " @ " + (e.filename || "") + ":" + (e.lineno || "")); });
+        window.addEventListener("unhandledrejection", function (e) { report("unhandledrejection: " + (e.reason && (e.reason.stack || e.reason))); });
+      })();
+    </script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ec5a46"/>
+      <stop offset="1" stop-color="#c23324"/>
+    </linearGradient>
+  </defs>
+  <!-- siatka macOS: 824×824 z marginesem 100 -->
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)"/>
+  <g fill="none" stroke="#fff" stroke-width="56" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="417" y="232" width="190" height="330" rx="95" fill="#fff" stroke="none"/>
+    <path d="M327 470v22a185 185 0 0 0 370 0v-22"/>
+    <path d="M512 677v95"/>
+    <path d="M412 772h200"/>
+  </g>
+  <!-- fale tekstu po prawej: mowa → tekst -->
+  <g stroke="#fff" stroke-width="30" stroke-linecap="round" opacity=".55">
+    <path d="M745 330h70"/><path d="M745 400h45"/>
+  </g>
+</svg>

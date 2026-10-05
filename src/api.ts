@@ -1,0 +1,204 @@
+import { invoke } from "@tauri-apps/api/core";
+
+export type EngineId = "parakeet_v3" | "whisper_turbo" | "whisper_large_v3";
+export type Language = "pl" | "en" | "auto";
+export type PasteMode = "auto" | "always" | "clipboard_only";
+export type ProviderId = "openai" | "openrouter" | "anthropic" | "zai";
+
+export interface ProviderConfig {
+  model: string;
+  base_url: string;
+}
+
+export interface Settings {
+  engine: EngineId;
+  language: Language;
+  input_device: string | null;
+  shortcut_push_to_talk: string;
+  shortcut_toggle: string;
+  modifier_push_to_talk: string;
+  paste_mode: PasteMode;
+  hud_enabled: boolean;
+  meeting_engine: EngineId;
+  meeting_diarization: boolean;
+  meeting_auto_transcribe: boolean;
+  meeting_auto_summarize: boolean;
+  meeting_audio_retention_days: number;
+  meeting_detection_prompt: boolean;
+  meeting_consent_reminder: boolean;
+  shortcut_meeting: string;
+  ai_provider: ProviderId;
+  ai_providers: Partial<Record<ProviderId, ProviderConfig>>;
+  ai_prompt: string;
+}
+
+export type AssetId = { kind: "engine"; engine: EngineId } | { kind: "silero_vad" };
+
+export interface ModelInfo {
+  id: AssetId;
+  key: string;
+  title: string;
+  description: string;
+  size: number;
+  installed: boolean;
+  downloading: boolean;
+}
+
+export interface DownloadEvent {
+  key: string;
+  done: number;
+  total: number;
+  finished: boolean;
+  error: string | null;
+}
+
+export interface Environment {
+  os: "macos" | "windows" | "linux" | string;
+  wayland: boolean;
+  can_send_keys: boolean;
+  hotkey_warnings: string[];
+  data_dir: string;
+}
+
+export type HudState =
+  | { phase: "idle" }
+  | { phase: "recording"; level: number; seconds: number }
+  | { phase: "transcribing" }
+  | { phase: "done"; text: string; pasted: boolean }
+  | { phase: "error"; message: string };
+
+export const api = {
+  getSettings: () => invoke<Settings>("get_settings"),
+  saveSettings: (settings: Settings) => invoke<string[]>("save_settings", { settings }),
+  listInputDevices: () => invoke<{ devices: string[]; default: string | null }>("list_input_devices"),
+  listModels: () => invoke<ModelInfo[]>("list_models"),
+  downloadModel: (id: AssetId) => invoke<void>("download_model", { id }),
+  cancelDownload: (id: AssetId) => invoke<void>("cancel_download", { id }),
+  deleteModel: (id: AssetId) => invoke<void>("delete_model", { id }),
+  environment: () => invoke<Environment>("environment"),
+  openAccessibilitySettings: () => invoke<string[]>("open_accessibility_settings"),
+  reloadHotkeys: () => invoke<string[]>("reload_hotkeys"),
+  pauseHotkeys: () => invoke<void>("pause_hotkeys"),
+};
+
+export function formatBytes(n: number): string {
+  if (n >= 1e9) return `${(n / 1e9).toFixed(1).replace(".", ",")} GB`;
+  if (n >= 1e6) return `${Math.round(n / 1e6)} MB`;
+  return `${Math.round(n / 1e3)} kB`;
+}
+
+export const ENGINE_LABELS: Record<EngineId, string> = {
+  parakeet_v3: "Parakeet TDT 0.6B v3",
+  whisper_turbo: "Whisper large-v3-turbo",
+  whisper_large_v3: "Whisper large-v3",
+};
+
+// MARK: - Spotkania i AI
+
+export type MeetingState =
+  | "recording"
+  | "interrupted"
+  | "recorded"
+  | "transcribing"
+  | "transcribed"
+  | "summarizing"
+  | "summarized"
+  | "failed";
+
+export interface Meeting {
+  id: string;
+  startedAt: string;
+  endedAt: string | null;
+  durationSeconds: number;
+  state: MeetingState;
+  hasSystemAudio: boolean;
+  title: string | null;
+  audioDeleted: boolean;
+  transcriptEngine: string | null;
+  lastError: string | null;
+}
+
+export interface MeetingDetail {
+  meeting: Meeting;
+  transcript: string | null;
+  summaries: { name: string; content: string }[];
+  folder: string;
+}
+
+export interface RecordingStatus {
+  recording: boolean;
+  meeting_id: string | null;
+  seconds: number;
+  has_system_audio: boolean;
+  warning: string | null;
+}
+
+export interface JobEvent {
+  meeting_id: string;
+  kind: "transcribe" | "summarize";
+  step: string;
+  fraction: number;
+  finished: boolean;
+  error: string | null;
+}
+
+export interface ProviderInfo {
+  id: ProviderId;
+  name: string;
+  has_key: boolean;
+  default_base_url: string;
+  default_model: string;
+  model_placeholder: string;
+}
+
+export const meetingsApi = {
+  status: () => invoke<RecordingStatus>("meeting_status"),
+  start: () => invoke<Meeting>("start_meeting"),
+  stop: () => invoke<Meeting>("stop_meeting"),
+  list: () => invoke<Meeting[]>("list_meetings"),
+  get: (id: string) => invoke<MeetingDetail>("get_meeting", { id }),
+  rename: (id: string, title: string) => invoke<void>("rename_meeting", { id, title }),
+  remove: (id: string) => invoke<void>("delete_meeting", { id }),
+  reveal: (id: string) => invoke<void>("reveal_meeting", { id }),
+  transcribe: (id: string, engine?: EngineId) => invoke<void>("transcribe_meeting", { id, engine: engine ?? null }),
+  summarize: (id: string, provider: ProviderId, model?: string) =>
+    invoke<void>("summarize_meeting", { id, provider, model: model ?? null }),
+  cancelJob: () => invoke<void>("cancel_job"),
+  job: () => invoke<JobEvent | null>("job_status"),
+  open: () => invoke<void>("open_meetings"),
+};
+
+export const aiApi = {
+  providers: () => invoke<ProviderInfo[]>("ai_providers"),
+  setKey: (provider: ProviderId, key: string) => invoke<void>("set_ai_key", { provider, key }),
+  test: (provider: ProviderId) => invoke<string[]>("test_ai", { provider }),
+  defaultPrompt: () => invoke<string>("default_summary_prompt"),
+  importLegacy: () => invoke<string[]>("import_legacy_keys"),
+};
+
+export const STATE_LABELS: Record<MeetingState, string> = {
+  recording: "nagrywane",
+  interrupted: "przerwane",
+  recorded: "nagrane",
+  transcribing: "przepisywanie…",
+  transcribed: "przepisane",
+  summarizing: "podsumowywanie…",
+  summarized: "podsumowane",
+  failed: "błąd",
+};
+
+const MONTHS = ["sty", "lut", "mar", "kwi", "maj", "cze", "lip", "sie", "wrz", "paź", "lis", "gru"];
+
+export function shortDate(iso: string): string {
+  const d = new Date(iso);
+  const hm = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}, ${hm}`;
+}
+
+export function clock(seconds: number): string {
+  const s = Math.round(seconds);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = String(s % 60).padStart(2, "0");
+  return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`;
+}
