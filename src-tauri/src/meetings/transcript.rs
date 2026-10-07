@@ -23,6 +23,9 @@ pub struct Utterance {
     pub text: String,
     #[serde(default)]
     pub speaker: String,
+    /// Tłumaczenie wypowiedzi (transkrypcja na żywo z tłumaczeniem przez Canary).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub translation: Option<String>,
 }
 
 /// Fragment przypisany jednemu mówcy przez rozpoznawanie mówców (ścieżka „system”).
@@ -140,6 +143,13 @@ pub fn merge_consecutive(utterances: &[Utterance], gap: f64) -> Vec<Utterance> {
                 last.end = last.end.max(u.end);
                 last.text.push(' ');
                 last.text.push_str(&u.text);
+                if let Some(t) = u.translation {
+                    let lt = last.translation.get_or_insert_with(String::new);
+                    if !lt.is_empty() {
+                        lt.push(' ');
+                    }
+                    lt.push_str(&t);
+                }
                 continue;
             }
         }
@@ -189,6 +199,9 @@ pub fn markdown(doc: &TranscriptDocument, started_at: DateTime<Local>) -> String
     ];
     for u in &doc.utterances {
         lines.push(format!("[{}] **{}:** {}", timestamp(u.start), u.speaker, u.text));
+        if let Some(t) = u.translation.as_deref().filter(|t| !t.is_empty()) {
+            lines.push(format!("> {t}"));
+        }
         lines.push(String::new());
     }
     lines.join("\n")
@@ -200,7 +213,7 @@ mod tests {
     use chrono::TimeZone;
 
     fn u(start: f64, end: f64, track: Track, text: &str) -> Utterance {
-        Utterance { start, end, track, text: text.into(), speaker: String::new() }
+        Utterance { start, end, track, text: text.into(), speaker: String::new(), translation: None }
     }
     fn seg(id: &str, start: f64, end: f64) -> SpeakerSegment {
         SpeakerSegment { speaker_id: id.into(), start, end }

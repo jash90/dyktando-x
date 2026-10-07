@@ -125,6 +125,12 @@ pub struct Settings {
     pub hud_enabled: bool,
 
     pub meeting_engine: EngineId,
+    /// Przepisuj wypowiedzi w trakcie nagrania (tekst pojawia się chwilę po każdej pauzie).
+    pub meeting_live_transcription: bool,
+    /// Kod języka tłumaczenia na żywo (np. „en”); pusty = bez tłumaczenia. Wymaga Canary.
+    pub meeting_live_translate_to: String,
+    /// Małe okno zawsze na wierzchu z licznikiem, poziomami i tekstem na żywo w trakcie nagrania.
+    pub meeting_live_window: bool,
     pub meeting_diarization: bool,
     pub meeting_auto_transcribe: bool,
     pub meeting_auto_summarize: bool,
@@ -151,6 +157,9 @@ impl Default for Settings {
             paste_mode: PasteMode::Auto,
             hud_enabled: true,
             meeting_engine: EngineId::ParakeetV3,
+            meeting_live_transcription: true,
+            meeting_live_translate_to: String::new(),
+            meeting_live_window: true,
             meeting_diarization: true,
             meeting_auto_transcribe: true,
             meeting_auto_summarize: false,

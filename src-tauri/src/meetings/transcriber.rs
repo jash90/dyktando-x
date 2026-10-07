@@ -73,7 +73,7 @@ pub fn transcribe(store: &Store, id: &str, opts: &Options, cancel: &AtomicBool, 
         check()?;
         let text = engine.transcribe(samples, opts.language)?;
         if !text.is_empty() {
-            mic.push(Utterance { start: mic_segs[i].0, end: mic_segs[i].1, track: Track::Mic, text, speaker: String::new() });
+            mic.push(Utterance { start: mic_segs[i].0, end: mic_segs[i].1, track: Track::Mic, text, speaker: String::new(), translation: None });
         }
         done += 1;
         progress(step("Przepisywanie", done));
@@ -87,7 +87,7 @@ pub fn transcribe(store: &Store, id: &str, opts: &Options, cancel: &AtomicBool, 
         let text = engine.transcribe(samples, opts.language)?;
         if !text.is_empty() {
             let (start, end) = sys_segs[i];
-            system.push(Utterance { start, end, track: Track::System, text, speaker: String::new() });
+            system.push(Utterance { start, end, track: Track::System, text, speaker: String::new(), translation: None });
             if let Some(e) = embedder.as_mut() {
                 voices.push((end - start, e.embed(samples).unwrap_or_else(|err| {
                     log::warn!("wektor głosu: {err}");

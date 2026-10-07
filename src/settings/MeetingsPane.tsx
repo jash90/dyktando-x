@@ -1,5 +1,5 @@
 import type { PaneProps } from "./SettingsApp";
-import { ENGINE_LABELS, meetingsApi, type EngineId } from "../api";
+import { ENGINE_LABELS, meetingsApi, TRANSLATION_TARGETS, type EngineId } from "../api";
 import ShortcutRecorder from "../components/ShortcutRecorder";
 
 export default function MeetingsPane({ settings, update, env }: PaneProps) {
@@ -30,6 +30,39 @@ export default function MeetingsPane({ settings, update, env }: PaneProps) {
           ))}
         </select>
         <p className="hint">Godzina nagrania: Parakeet ok. 2–5 min, Whisper turbo kilkanaście minut (zależnie od komputera).</p>
+      </div>
+      <div className="row check">
+        <label>
+          <input
+            type="checkbox"
+            checked={settings.meeting_live_transcription}
+            onChange={(e) => update({ meeting_live_transcription: e.target.checked })}
+          />
+          Przepisuj na żywo w trakcie nagrania (tekst pojawia się chwilę po każdej pauzie; najszybciej z Parakeetem)
+        </label>
+        <label>
+          <input type="checkbox" checked={settings.meeting_live_window} onChange={(e) => update({ meeting_live_window: e.target.checked })} />
+          Pokazuj w trakcie nagrania małe okno na wierzchu z licznikiem, poziomami dźwięku i tekstem na żywo
+        </label>
+      </div>
+      <div className="row">
+        <label>Tłumacz na żywo na</label>
+        <select
+          value={settings.meeting_live_translate_to}
+          disabled={!settings.meeting_live_transcription}
+          onChange={(e) => update({ meeting_live_translate_to: e.target.value })}
+        >
+          {TRANSLATION_TARGETS.map(([code, name]) => (
+            <option key={code} value={code}>
+              {name}
+            </option>
+          ))}
+        </select>
+        <p className="hint">
+          Tłumaczy Canary 1B v2 (musi być pobrany) — między angielskim a pozostałymi językami, np. polski → angielski albo angielski → polski.
+          Język źródłowy to ustawienie „Język” z zakładki Dyktowanie. Każda wypowiedź jest dekodowana dwa razy, więc tekst pojawia się później
+          niż bez tłumaczenia.
+        </p>
       </div>
       <div className="row check">
         <label>

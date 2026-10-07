@@ -7,6 +7,7 @@ mod engine;
 mod focus;
 mod hotkeys;
 mod hud;
+mod live_window;
 mod meetings;
 mod models;
 mod paste;
@@ -276,15 +277,21 @@ fn start_background(app: &AppHandle) {
             }
         }
     });
+    // Status nagrania 4×/s (poziomy w oknie na żywo); pasek odświeżany tylko, gdy zmieni się sekunda.
     let handle = app.clone();
     std::thread::spawn(move || {
         let mut last_retention = std::time::Instant::now() - std::time::Duration::from_secs(86_400);
         let mut was_recording = false;
+        let mut last_second = u64::MAX;
         loop {
             let state = handle.state::<AppState>();
             let status = state.recorder.status();
             if status.recording || was_recording {
-                tray::refresh(&handle);
+                let second = if status.recording { status.seconds as u64 } else { u64::MAX };
+                if second != last_second || status.recording != was_recording {
+                    tray::refresh(&handle);
+                }
+                last_second = second;
                 let _ = handle.emit("meeting-status", &status);
             }
             was_recording = status.recording;
@@ -296,7 +303,7 @@ fn start_background(app: &AppHandle) {
                 }
                 last_retention = std::time::Instant::now();
             }
-            std::thread::sleep(std::time::Duration::from_secs(1));
+            std::thread::sleep(std::time::Duration::from_millis(250));
         }
     });
 }
@@ -408,6 +415,8 @@ pub fn run() {
             pause_hotkeys,
             js_error,
             commands::meeting_status,
+            commands::live_transcript,
+            commands::hide_live_window,
             commands::start_meeting,
             commands::stop_meeting,
             commands::list_meetings,

@@ -2,16 +2,19 @@
 //! 16 kHz i zapis na dysk (nic nie rośnie w RAM). Ścieżki trzymamy wyrównane względem zegara
 //! nagrania: gdy któraś zaczyna później albo ma przerwę (np. tap utworzony na nowo po zgodzie
 //! użytkownika), lukę wypełniamy ciszą — znaczniki czasu obu ścieżek się zgadzają.
+//! Opcjonalnie próbki 16 kHz obu ścieżek idą też do transkrypcji na żywo (`live`).
 use anyhow::{anyhow, Result};
 use chrono::Local;
 use serde::Serialize;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
+use super::live::{self, Live};
 use super::store::{Meeting, State, Store, MIC, SYSTEM};
 use super::system::{self, SystemCapture};
+use super::transcript::{self, TranscriptDocument, Utterance};
 use super::writer::{SegmentedWriter, RATE};
 use crate::audio::capture::InputCapture;
 use crate::audio::resample::StreamResampler;
@@ -24,11 +27,14 @@ struct Track {
     resampler: Option<StreamResampler>,
     started: Instant,
     error: Option<String>,
+    live: Option<(Arc<Live>, transcript::Track)>,
+    /// Szczytowy RMS od ostatniego odczytu (bity f32) — wskaźnik „sygnał jest” w oknie na żywo.
+    peak: Arc<AtomicU32>,
 }
 
 impl Track {
-    fn new(writer: SegmentedWriter, started: Instant) -> Self {
-        Self { writer: Some(writer), resampler: None, started, error: None }
+    fn new(writer: SegmentedWriter, started: Instant, live: Option<(Arc<Live>, transcript::Track)>) -> Self {
+        Self { writer: Some(writer), resampler: None, started, error: None, live, peak: Arc::new(AtomicU32::new(0)) }
     }
 
     fn set_rate(&mut self, rate: u32) {
@@ -38,6 +44,11 @@ impl Track {
     fn push(&mut self, samples: &[f32]) {
         let (Some(r), Some(w)) = (self.resampler.as_mut(), self.writer.as_mut()) else { return };
         let out = r.push(samples);
+        if let Some((live, kind)) = &self.live {
+            live.feed(*kind, &out);
+        }
+        let rms = crate::audio::rms(&out);
+        let _ = self.peak.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |old| (rms > f32::from_bits(old)).then(|| rms.to_bits()));
         let expected = (self.started.elapsed().as_secs_f64() * RATE as f64) as u64;
         let after = w.samples_written() + out.len() as u64;
         let result = if expected > after + GAP_TOLERANCE { w.append_silence(expected - after) } else { Ok(()) }.and_then(|_| w.append(&out));
@@ -68,6 +79,9 @@ pub struct RecordingStatus {
     pub seconds: f64,
     pub has_system_audio: bool,
     pub warning: Option<String>,
+    /// Szczytowy poziom (RMS) mikrofonu i dźwięku systemowego od poprzedniego odczytu.
+    pub mic_level: f32,
+    pub system_level: f32,
 }
 
 struct Active {
@@ -80,7 +94,11 @@ struct Active {
     stop_monitor: Arc<AtomicBool>,
     monitor: Option<JoinHandle<()>>,
     warning: Arc<Mutex<Option<String>>>,
+    live: Option<Arc<Live>>,
 }
+
+/// Odbiorca zdarzeń transkrypcji na żywo: (id spotkania, zdarzenie).
+pub type LiveListener = Box<dyn Fn(&str, live::Event) + Send + Sync + 'static>;
 
 #[derive(Default)]
 pub struct Recorder {
@@ -105,14 +123,27 @@ impl Recorder {
     pub fn status(&self) -> RecordingStatus {
         let guard = self.active.lock().unwrap();
         match guard.as_ref() {
-            Some(a) => RecordingStatus {
-                recording: true,
-                meeting_id: Some(a.meeting.id.clone()),
-                seconds: a.started.elapsed().as_secs_f64(),
-                has_system_audio: a.system.lock().unwrap().is_some(),
-                warning: a.warning.lock().unwrap().clone(),
+            Some(a) => {
+                let peak = |t: &Arc<Mutex<Track>>| f32::from_bits(t.lock().unwrap().peak.swap(0, Ordering::Relaxed));
+                RecordingStatus {
+                    recording: true,
+                    meeting_id: Some(a.meeting.id.clone()),
+                    seconds: a.started.elapsed().as_secs_f64(),
+                    has_system_audio: a.system.lock().unwrap().is_some(),
+                    warning: a.warning.lock().unwrap().clone(),
+                    mic_level: peak(&a.mic_track),
+                    system_level: peak(&a.sys_track),
+                }
+            }
+            None => RecordingStatus {
+                recording: false,
+                meeting_id: None,
+                seconds: 0.0,
+                has_system_audio: false,
+                warning: None,
+                mic_level: 0.0,
+                system_level: 0.0,
             },
-            None => RecordingStatus { recording: false, meeting_id: None, seconds: 0.0, has_system_audio: false, warning: None },
         }
     }
 
@@ -120,7 +151,16 @@ impl Recorder {
         self.active.lock().unwrap().is_some()
     }
 
-    pub fn start(&self, store: &Store, input_device: Option<&str>) -> Result<Meeting> {
+    /// Wypowiedzi przepisane dotąd na żywo w trwającym nagraniu (dla okna otwartego w trakcie).
+    pub fn live_utterances(&self) -> Vec<Utterance> {
+        let guard = self.active.lock().unwrap();
+        let mut all = guard.as_ref().and_then(|a| a.live.as_ref()).map(|l| l.utterances()).unwrap_or_default();
+        all.sort_by(|a, b| a.start.partial_cmp(&b.start).unwrap_or(std::cmp::Ordering::Equal));
+        all
+    }
+
+    /// `live`: konfiguracja transkrypcji na żywo i odbiorca jej zdarzeń; `None` = wyłączona.
+    pub fn start(&self, store: &Store, input_device: Option<&str>, live: Option<(live::Config, LiveListener)>) -> Result<Meeting> {
         let mut guard = self.active.lock().unwrap();
         if guard.is_some() {
             return Err(anyhow!("Nagrywanie już trwa"));
@@ -129,8 +169,22 @@ impl Recorder {
         let meeting = store.create(Local::now(), system_available.is_ok())?;
         let audio = store.audio_folder(&meeting.id);
         let started = Instant::now();
-        let mic_track = Arc::new(Mutex::new(Track::new(SegmentedWriter::new(&audio, MIC)?, started)));
-        let sys_track = Arc::new(Mutex::new(Track::new(SegmentedWriter::new(&audio, SYSTEM)?, started)));
+        // Transkrypcja na żywo: brak modelu nie blokuje nagrania — tylko tekst się nie pojawi.
+        let live = live.and_then(|(config, listener)| {
+            let listener = Arc::new(listener);
+            let (id, l) = (meeting.id.clone(), listener.clone());
+            match Live::start(config, Box::new(move |e| l(&id, e))) {
+                Ok(l) => Some(Arc::new(l)),
+                Err(e) => {
+                    log::warn!("transkrypcja na żywo wyłączona: {e}");
+                    listener(&meeting.id, live::Event::Error(e.to_string()));
+                    None
+                }
+            }
+        });
+        let tee = |kind| live.as_ref().map(|l| (l.clone(), kind));
+        let mic_track = Arc::new(Mutex::new(Track::new(SegmentedWriter::new(&audio, MIC)?, started, tee(transcript::Track::Mic))));
+        let sys_track = Arc::new(Mutex::new(Track::new(SegmentedWriter::new(&audio, SYSTEM)?, started, tee(transcript::Track::System))));
         let warning = Arc::new(Mutex::new(system_available.clone().err()));
 
         let sink_track = mic_track.clone();
@@ -202,11 +256,14 @@ impl Recorder {
             stop_monitor,
             monitor: Some(monitor),
             warning,
+            live,
         });
         Ok(meeting)
     }
 
     /// Kończy nagranie, wyrównuje długości ścieżek i zapisuje `meeting.json` (stan `recorded`).
+    /// Tekst z transkrypcji na żywo zostaje zapisany jako transkrypt tymczasowy (bez mówców);
+    /// pełna transkrypcja po nagraniu go nadpisze.
     pub fn stop(&self, store: &Store) -> Result<Meeting> {
         let mut a = self.active.lock().unwrap().take().ok_or_else(|| anyhow!("Nic nie jest nagrywane"))?;
         a.stop_monitor.store(true, Ordering::Relaxed);
@@ -238,14 +295,47 @@ impl Recorder {
                 errors.push(e);
             }
         }
+        let live_engine = a.live.take().and_then(|l| {
+            let utterances = l.finish();
+            if utterances.is_empty() {
+                return None;
+            }
+            let engine = format!("{} (na żywo)", l.engine_title);
+            match save_live_transcript(store, &a.meeting, &engine, seconds, &utterances) {
+                Ok(()) => Some(engine),
+                Err(e) => {
+                    log::error!("zapis transkryptu na żywo: {e}");
+                    None
+                }
+            }
+        });
         let meeting = store.update(&a.meeting.id, |m| {
             m.state = State::Recorded;
             m.ended_at = Some(Local::now());
             m.duration_seconds = seconds;
             m.has_system_audio = had_system;
             m.last_error = (!errors.is_empty()).then(|| errors.join("; "));
+            if live_engine.is_some() {
+                m.transcript_engine = live_engine.clone();
+            }
         })?;
         log::info!("Koniec nagrania {} ({:.0} s)", meeting.id, seconds);
         Ok(meeting)
     }
+}
+
+/// Transkrypt tymczasowy z wypowiedzi na żywo: te same pliki co po pełnej transkrypcji
+/// (`transcript.json`, `transcript.md`), bez rozpoznawania mówców.
+fn save_live_transcript(store: &Store, meeting: &Meeting, engine: &str, seconds: f64, utterances: &[Utterance]) -> Result<()> {
+    let (mic, system): (Vec<Utterance>, Vec<Utterance>) = utterances.iter().cloned().partition(|u| u.track == transcript::Track::Mic);
+    let doc = TranscriptDocument {
+        meeting_id: meeting.id.clone(),
+        engine: engine.to_string(),
+        created_at: Local::now(),
+        duration_seconds: seconds,
+        utterances: transcript::build(&mic, &system, None),
+    };
+    std::fs::write(store.transcript_json(&meeting.id), serde_json::to_vec_pretty(&doc)?)?;
+    std::fs::write(store.transcript_md(&meeting.id), transcript::markdown(&doc, meeting.started_at))?;
+    Ok(())
 }

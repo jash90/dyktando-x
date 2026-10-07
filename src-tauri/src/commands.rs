@@ -5,8 +5,10 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use crate::ai::{keys, provider::LlmConfig, summarizer};
 use crate::dictation::{emit as hud_emit, HudState};
+use crate::meetings::live;
 use crate::meetings::processing::{self, JobEvent};
 use crate::meetings::recorder::RecordingStatus;
+use crate::meetings::transcript::Utterance;
 use crate::meetings::store::{read_to_string, Meeting, Store};
 use crate::models::EngineId;
 use crate::settings::ProviderId;
@@ -21,10 +23,34 @@ fn changed(app: &AppHandle) {
     crate::refresh_tray(app);
 }
 
+/// Zdarzenie transkrypcji na żywo dla interfejsu (`meeting-live`).
+#[derive(Clone, Serialize)]
+pub struct LivePayload {
+    meeting_id: String,
+    utterance: Option<Utterance>,
+    error: Option<String>,
+}
+
 pub fn start_meeting_inner(app: &AppHandle) -> Result<Meeting, String> {
     let state = app.state::<AppState>();
     let settings = state.settings.lock().unwrap().clone();
-    let meeting = state.recorder.start(&store(), settings.input_device.as_deref()).map_err(|e| e.to_string())?;
+    let live = settings.meeting_live_transcription.then(|| {
+        let app = app.clone();
+        let translate_to = Some(settings.meeting_live_translate_to.trim().to_string()).filter(|t| !t.is_empty());
+        let config = live::Config { engine: settings.meeting_engine, language: settings.language, translate_to };
+        let listener: crate::meetings::recorder::LiveListener = Box::new(move |id: &str, e: live::Event| {
+            let (utterance, error) = match e {
+                live::Event::Utterance(u) => (Some(u), None),
+                live::Event::Error(m) => (None, Some(m)),
+            };
+            let _ = app.emit("meeting-live", LivePayload { meeting_id: id.to_string(), utterance, error });
+        });
+        (config, listener)
+    });
+    let meeting = state.recorder.start(&store(), settings.input_device.as_deref(), live).map_err(|e| e.to_string())?;
+    if settings.meeting_live_window {
+        crate::live_window::show(app);
+    }
     if settings.meeting_consent_reminder {
         hud_emit(app, HudState::Info { message: "Nagrywam spotkanie — pamiętaj, żeby poinformować rozmówców.".into() });
     }
@@ -35,6 +61,7 @@ pub fn start_meeting_inner(app: &AppHandle) -> Result<Meeting, String> {
 pub fn stop_meeting_inner(app: &AppHandle) -> Result<Meeting, String> {
     let state = app.state::<AppState>();
     let meeting = state.recorder.stop(&store()).map_err(|e| e.to_string())?;
+    crate::live_window::hide(app);
     hud_emit(app, HudState::Info { message: format!("Nagranie zapisane ({})", crate::meetings::transcript::clock(meeting.duration_seconds)) });
     changed(app);
     processing::after_recording(app.clone(), meeting.id.clone());
@@ -53,6 +80,18 @@ pub fn toggle_meeting_from(app: &AppHandle) {
 #[tauri::command]
 pub fn meeting_status(state: tauri::State<AppState>) -> RecordingStatus {
     state.recorder.status()
+}
+
+/// Wypowiedzi przepisane na żywo w trwającym nagraniu (okno otwarte w trakcie spotkania).
+#[tauri::command]
+pub fn live_transcript(state: tauri::State<AppState>) -> Vec<Utterance> {
+    state.recorder.live_utterances()
+}
+
+/// Zamknięcie okna „na żywo” przez użytkownika (nagranie trwa dalej; okno wróci przy następnym).
+#[tauri::command]
+pub fn hide_live_window(app: AppHandle) {
+    crate::live_window::hide(&app);
 }
 
 #[tauri::command]

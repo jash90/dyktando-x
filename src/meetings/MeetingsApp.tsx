@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { AlertTriangle, Circle, FileText, FolderOpen, Mic, Pencil, Sparkles, Square, Trash2, Wand2, X } from "lucide-react";
 import {
@@ -11,11 +11,13 @@ import {
   STATE_LABELS,
   type EngineId,
   type JobEvent,
+  type LivePayload,
   type Meeting,
   type MeetingDetail,
   type ProviderInfo,
   type RecordingStatus,
   type Settings,
+  type Utterance,
 } from "../api";
 import Markdown from "../components/Markdown";
 
@@ -28,6 +30,8 @@ export default function MeetingsApp() {
   const [status, setStatus] = useState<RecordingStatus | null>(null);
   const [job, setJob] = useState<JobEvent | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [live, setLive] = useState<Utterance[]>([]);
+  const [liveError, setLiveError] = useState<string | null>(null);
 
   const refreshList = useCallback(() => meetingsApi.list().then(setMeetings), []);
   const refreshDetail = useCallback(() => {
@@ -48,9 +52,24 @@ export default function MeetingsApp() {
         setJob(e.payload.finished ? null : e.payload);
         if (e.payload.finished && e.payload.error && e.payload.error !== "Przerwano") setError(e.payload.error);
       }),
+      listen<LivePayload>("meeting-live", (e) => {
+        const { utterance, error: err } = e.payload;
+        if (utterance) setLive((prev) => [...prev, utterance].sort((a, b) => a.start - b.start));
+        if (err) setLiveError(err);
+      }),
     ];
     return () => uns.forEach((u) => u.then((f) => f()));
   }, [refreshList]);
+
+  // Okno otwarte w trakcie spotkania: dociągnij to, co już przepisano; po nagraniu wyczyść.
+  useEffect(() => {
+    if (status?.recording) {
+      meetingsApi.liveTranscript().then((u) => setLive((prev) => (prev.length > u.length ? prev : u)));
+    } else {
+      setLive([]);
+      setLiveError(null);
+    }
+  }, [status?.recording, status?.meeting_id]);
 
   useEffect(() => {
     if (!selected && meetings.length) setSelected(meetings[0].id);
@@ -109,7 +128,14 @@ export default function MeetingsApp() {
           </div>
         )}
         {detail ? (
-          <Detail detail={detail} job={job?.meeting_id === detail.meeting.id ? job : null} busy={!!job} onError={setError} onChanged={refreshList} />
+          <Detail
+            detail={detail}
+            job={job?.meeting_id === detail.meeting.id ? job : null}
+            busy={!!job}
+            live={status?.recording && status.meeting_id === detail.meeting.id ? { items: live, error: liveError } : null}
+            onError={setError}
+            onChanged={refreshList}
+          />
         ) : (
           <div className="empty">
             <Mic size={40} strokeWidth={1.5} />
@@ -125,17 +151,19 @@ function Detail({
   detail,
   job,
   busy,
+  live,
   onError,
   onChanged,
 }: {
   detail: MeetingDetail;
   job: JobEvent | null;
   busy: boolean;
+  live: { items: Utterance[]; error: string | null } | null;
   onError: (e: string | null) => void;
   onChanged: () => void;
 }) {
   const m = detail.meeting;
-  const [tab, setTab] = useState<Tab>(detail.summaries.length ? "summary" : "transcript");
+  const [tab, setTab] = useState<Tab>(detail.summaries.length && !live ? "summary" : "transcript");
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [engine, setEngine] = useState<EngineId | null>(null);
   const [provider, setProvider] = useState<string>("");
@@ -155,7 +183,7 @@ function Detail({
     setTitle(m.title ?? "");
     setEditing(false);
     setSummaryIndex(0);
-    setTab(detail.summaries.length ? "summary" : "transcript");
+    setTab(detail.summaries.length && !live ? "summary" : "transcript");
   }, [m.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const recording = m.state === "recording";
@@ -175,7 +203,7 @@ function Detail({
   };
 
   const copy = () => {
-    const text = tab === "summary" ? summary?.content : detail.transcript;
+    const text = tab === "summary" ? summary?.content : live ? liveText(live.items) : detail.transcript;
     if (text) navigator.clipboard.writeText(text);
   };
 
@@ -308,12 +336,43 @@ function Detail({
             </p>
           ))}
         {tab === "transcript" &&
-          (detail.transcript ? (
+          (live ? (
+            <LiveTranscript items={live.items} error={live.error} />
+          ) : detail.transcript ? (
             <Markdown text={detail.transcript} />
           ) : (
             <p className="hint">{recording ? "Trwa nagrywanie…" : "Brak transkryptu. Kliknij „Przepisz”."}</p>
           ))}
       </div>
     </section>
+  );
+}
+
+function liveText(items: Utterance[]): string {
+  return items.map((u) => `[${clock(u.start)}] ${u.speaker}: ${u.text}${u.translation ? `\n    ${u.translation}` : ""}`).join("\n");
+}
+
+/// Transkrypcja na żywo: wypowiedzi pojawiają się chwilę po każdej pauzie, widok sam przewija do końca.
+function LiveTranscript({ items, error }: { items: Utterance[]; error: string | null }) {
+  const end = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    end.current?.scrollIntoView({ block: "nearest" });
+  }, [items.length]);
+  return (
+    <div className="live">
+      <p className="hint">
+        <span className="live-dot" /> Na żywo — tekst tymczasowy, bez rozpoznawania rozmówców. Pełny transkrypt powstanie po zakończeniu nagrania.
+      </p>
+      {error && <div className="error">Transkrypcja na żywo niedostępna: {error}</div>}
+      {items.length === 0 && !error && <p className="hint">Słucham…</p>}
+      {items.map((u) => (
+        <div key={`${u.track}-${u.start}`} className="live-line">
+          <time>{clock(u.start)}</time>
+          <b className={u.track === "mic" ? "me" : ""}>{u.speaker}:</b> {u.text}
+          {u.translation && <div className="live-translation">{u.translation}</div>}
+        </div>
+      ))}
+      <div ref={end} />
+    </div>
   );
 }

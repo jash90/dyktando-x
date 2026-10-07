@@ -38,9 +38,34 @@ impl Engine {
         })
     }
 
+    /// Czy silnik umie tłumaczyć na `target` (Canary: między angielskim a resztą swoich
+    /// języków; Whisper: tylko na angielski; Parakeet: wcale).
+    pub fn can_translate(&self, language: Language, target: &str) -> bool {
+        match self {
+            Engine::Canary(_) => {
+                let source = language.code().unwrap_or("pl");
+                source != target && (source == "en" || target == "en")
+            }
+            Engine::Whisper(_) => target == "en" && language.code() != Some("en"),
+            Engine::Parakeet(_) => false,
+        }
+    }
+
     /// Zwraca sam tekst (bez postprocessingu). Parakeet v3 sam rozpoznaje język;
     /// Whisper dostaje kod języka albo autodetekcję.
     pub fn transcribe(&mut self, samples: &[f32], language: Language) -> Result<String> {
+        self.run(samples, language, None)
+    }
+
+    /// Tłumaczenie mowy na `target` (kod języka, np. „en”) — zob. `can_translate`.
+    pub fn translate(&mut self, samples: &[f32], language: Language, target: &str) -> Result<String> {
+        if !self.can_translate(language, target) {
+            return Err(anyhow!("Ten model nie tłumaczy z {} na {target}", language.code().unwrap_or("auto")));
+        }
+        self.run(samples, language, Some(target))
+    }
+
+    fn run(&mut self, samples: &[f32], language: Language, target: Option<&str>) -> Result<String> {
         if samples.len() < (SAMPLE_RATE as usize) / 10 {
             return Ok(String::new());
         }
@@ -62,12 +87,17 @@ impl Engine {
             }
             Engine::Canary(m) => {
                 // Canary nie rozpoznaje języka sam — „automatycznie” traktujemy jak polski.
-                let params = CanaryParams { language: Some(language.code().unwrap_or("pl").to_string()), ..Default::default() };
+                let params = CanaryParams {
+                    language: Some(language.code().unwrap_or("pl").to_string()),
+                    target_language: target.map(str::to_string),
+                    ..Default::default()
+                };
                 m.transcribe_with(samples, &params).map_err(|e| anyhow!("Canary: {e}"))?.text
             }
             Engine::Whisper(w) => {
                 let params = WhisperInferenceParams {
                     language: language.code().map(str::to_string),
+                    translate: target == Some("en"),
                     ..Default::default()
                 };
                 w.transcribe_with(samples, &params).map_err(|e| anyhow!("Whisper: {e}"))?.text
@@ -139,6 +169,22 @@ mod tests {
     #[ignore]
     fn canary_transcribes_polish() {
         check(EngineId::CanaryV2);
+    }
+
+    /// Tłumaczenie pl→en przez Canary: `cargo test -- --ignored canary_translates`.
+    #[test]
+    #[ignore]
+    fn canary_translates_polish_to_english() {
+        ensure(EngineId::CanaryV2.asset());
+        let mut e = Engine::load(EngineId::CanaryV2).unwrap();
+        assert!(e.can_translate(Language::Pl, "en"));
+        assert!(!e.can_translate(Language::Pl, "de"));
+        let t = std::time::Instant::now();
+        let text = e.translate(&fixture(), Language::Pl, "en").unwrap();
+        println!("Canary pl→en w {:?}: {text}", t.elapsed());
+        let got = words(&text);
+        assert!(got.contains(&"visa".to_string()), "{text}");
+        assert!(!got.contains(&"wizy".to_string()), "{text}");
     }
 
     #[test]

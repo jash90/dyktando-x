@@ -20,6 +20,9 @@ export interface Settings {
   paste_mode: PasteMode;
   hud_enabled: boolean;
   meeting_engine: EngineId;
+  meeting_live_transcription: boolean;
+  meeting_live_translate_to: string;
+  meeting_live_window: boolean;
   meeting_diarization: boolean;
   meeting_auto_transcribe: boolean;
   meeting_auto_summarize: boolean;
@@ -89,6 +92,22 @@ export function formatBytes(n: number): string {
   return `${Math.round(n / 1e3)} kB`;
 }
 
+/** Języki tłumaczenia na żywo (Canary 1B v2 tłumaczy między angielskim a pozostałymi). */
+export const TRANSLATION_TARGETS: [string, string][] = [
+  ["", "nie tłumacz"],
+  ["en", "angielski"],
+  ["pl", "polski"],
+  ["de", "niemiecki"],
+  ["fr", "francuski"],
+  ["es", "hiszpański"],
+  ["it", "włoski"],
+  ["uk", "ukraiński"],
+  ["cs", "czeski"],
+  ["pt", "portugalski"],
+  ["nl", "niderlandzki"],
+  ["sv", "szwedzki"],
+];
+
 export const ENGINE_LABELS: Record<EngineId, string> = {
   parakeet_v3: "Parakeet TDT 0.6B v3",
   canary_v2: "Canary 1B v2",
@@ -134,6 +153,23 @@ export interface RecordingStatus {
   seconds: number;
   has_system_audio: boolean;
   warning: string | null;
+  mic_level: number;
+  system_level: number;
+}
+
+export interface Utterance {
+  start: number;
+  end: number;
+  track: "mic" | "system";
+  text: string;
+  speaker: string;
+  translation?: string | null;
+}
+
+export interface LivePayload {
+  meeting_id: string;
+  utterance: Utterance | null;
+  error: string | null;
 }
 
 export interface JobEvent {
@@ -156,6 +192,8 @@ export interface ProviderInfo {
 
 export const meetingsApi = {
   status: () => invoke<RecordingStatus>("meeting_status"),
+  liveTranscript: () => invoke<Utterance[]>("live_transcript"),
+  hideLiveWindow: () => invoke<void>("hide_live_window"),
   start: () => invoke<Meeting>("start_meeting"),
   stop: () => invoke<Meeting>("stop_meeting"),
   list: () => invoke<Meeting[]>("list_meetings"),
