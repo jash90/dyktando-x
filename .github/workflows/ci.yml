@@ -27,7 +27,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Zależności systemowe (Linux)
+      - name: System dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
@@ -44,7 +44,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-          # Zapis cache tylko z main — PR-y go czytają, ale nie nadpisują (Windows zapisuje ~6 min).
+          # Cache is saved only from main — PRs read it but never overwrite it (saving on Windows takes ~6 min).
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Frontend (TypeScript + Vite)
@@ -52,11 +52,11 @@ jobs:
           npm ci
           npm run build
 
-      - name: Testy Rust
+      - name: Rust tests
         working-directory: src-tauri
         run: cargo test --lib --locked
 
-      # Budowa debug korzysta z tego, co już skompilowały testy (ten sam profil). Pełne LTO
-      # (drugi, jednowątkowy przebieg kompilacji) jest tylko w workflow wydania.
-      - name: Budowa aplikacji (debug, bez paczek)
+      # The debug build reuses what the tests already compiled (same profile). Full LTO
+      # (a second, single-threaded compilation pass) happens only in the release workflow.
+      - name: Build app (debug, no bundles)
         run: npx tauri build --debug --no-bundle

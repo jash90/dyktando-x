@@ -1,7 +1,7 @@
 [package]
 name = "dyktando-x"
 version = "0.2.0"
-description = "A Tauri App"
+description = "Polish dictation and meeting recording with local speech models"
 authors = ["you"]
 edition = "2021"
 

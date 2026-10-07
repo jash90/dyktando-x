@@ -1,61 +1,65 @@
 # Dyktando X
 
-Dyktowanie po polsku i nagrywanie spotkań na **macOS, Windows i Linuksie**. Rozpoznawanie mowy
-działa lokalnie, nagrania nie opuszczają komputera. Do dostawcy AI trafia tylko transkrypt i tylko
-wtedy, gdy poprosisz o podsumowanie.
+Polish dictation and meeting recording for **macOS, Windows and Linux**. Speech recognition runs
+locally and recordings never leave your computer. Only the transcript is sent to an AI provider,
+and only when you ask for a summary.
 
-Wieloplatformowa wersja [Dyktando dla macOS](https://github.com/jash90/dyktando-mac) (Swift).
+Cross-platform version of [Dyktando for macOS](https://github.com/jash90/dyktando-mac) (Swift).
 Tauri 2 + Rust + React/TypeScript.
 
-## Co umie
+## Features
 
-- **Dyktowanie:** przytrzymaj skrót (domyślnie F5) albo sam prawy ⌘/Ctrl, powiedz zdanie, a tekst
-  wklei się w aktywne pole. Polskie polecenia („kropka”, „przecinek”, „nowy akapit”…), wielkie
-  litery, przywracanie schowka. Gdy fokus nie jest w polu tekstowym, tekst trafia tylko do schowka.
-- **Modele** (pobierane w aplikacji):
+- **Dictation:** hold a shortcut (F5 by default) or just the right ⌘/Ctrl key, say a sentence, and
+  the text is pasted into the active field. Polish spoken commands ("kropka", "przecinek",
+  "nowy akapit"…), capitalization, clipboard restore. When the focus is not in a text field, the
+  text goes to the clipboard only.
+- **Models** (downloaded inside the app):
 
-  | Model | Silnik | Rozmiar |
+  | Model | Engine | Size |
   |---|---|---|
-  | Parakeet TDT 0.6B v3 (domyślny) | ONNX | 670 MB |
+  | Parakeet TDT 0.6B v3 (default) | ONNX | 670 MB |
   | Canary 1B v2 | ONNX | 1 GB |
-  | Whisper large-v3-turbo | whisper.cpp | 1,6 GB |
-  | Whisper large-v3 (q5_0) | whisper.cpp | 1,1 GB |
+  | Whisper large-v3-turbo | whisper.cpp | 1.6 GB |
+  | Whisper large-v3 (q5_0) | whisper.cpp | 1.1 GB |
 
-- **Spotkania:** dwie ścieżki, czyli Twój mikrofon i dźwięk aplikacji (rozmówcy w Meet, Zoom, Teams).
-  Po nagraniu transkrypcja z podziałem na mówców („Ja”, „Rozmówca 1”, „Rozmówca 2”…). Podpowiedź
-  „Wykryto spotkanie — nagrać?” pojawia się, gdy komunikator używa mikrofonu.
-- **Podsumowania AI:** Anthropic, OpenAI, OpenRouter, Z.AI. Klucze są w systemowym magazynie haseł,
-  a długie spotkania podsumowywane map-reduce.
+- **Meetings:** two tracks, your microphone and application audio (the other participants in Meet,
+  Zoom, Teams). Live transcription while recording, shown in a small always-on-top window with the
+  timer and signal levels of both tracks, optionally translated by Canary (between English and the
+  other supported languages). After the recording, a full transcript with speaker labels ("Ja",
+  "Rozmówca 1", "Rozmówca 2"…). A "Meeting detected — record?" prompt appears when a conferencing
+  app starts using the microphone.
+- **AI summaries:** Anthropic, OpenAI, OpenRouter, Z.AI. API keys are stored in the system
+  credential store, and long meetings are summarized with map-reduce.
 
-## Wymagania systemowe
+## System requirements
 
-| | Dyktowanie | Dźwięk aplikacji na spotkaniach |
+| | Dictation | Application audio in meetings |
 |---|---|---|
-| macOS | 13+, uprawnienia Mikrofon i Dostępność | 14.4+ (Core Audio process tap), zgoda „Nagrywanie dźwięku systemowego” |
-| Windows | 10/11 | Windows 11 albo Windows 10 kompilacja 20348+ (WASAPI process loopback) |
-| Linux (glibc 2.38+: Ubuntu 24.04, Debian 13, Fedora 39 i nowsze) | X11 i Wayland; skróty przez `/dev/input` (reguła udev w paczce .deb/.rpm) | PulseAudio/PipeWire, program `parec` (pulseaudio-utils) |
+| macOS | 13+, Microphone and Accessibility permissions | 14.4+ (Core Audio process tap), "System Audio Recording" consent |
+| Windows | 10/11 | Windows 11 or Windows 10 build 20348+ (WASAPI process loopback) |
+| Linux (glibc 2.38+: Ubuntu 24.04, Debian 13, Fedora 39 and newer) | X11 and Wayland; shortcuts via `/dev/input` (udev rule in the .deb/.rpm package) | PulseAudio/PipeWire, the `parec` tool (pulseaudio-utils) |
 
-Na Waylandzie wklejanie używa po kolei `wtype` (Sway, Hyprland), `dotool` i `ydotool`. Bez nich
-tekst zostaje w schowku.
+On Wayland, pasting tries `wtype` (Sway, Hyprland), `dotool` and `ydotool` in that order. Without
+them the text stays in the clipboard.
 
-## Budowanie
+## Building
 
 ```bash
 npm ci
-npm run tauri dev                          # tryb deweloperski
-npm run tauri build                        # paczki dla bieżącego systemu
-cd src-tauri && cargo test --lib           # testy jednostkowe
-cargo test --lib -- --ignored synthetic_meeting   # test spotkania (pobiera modele)
+npm run tauri dev                          # development mode
+npm run tauri build                        # packages for the current OS
+cd src-tauri && cargo test --lib           # unit tests
+cargo test --lib -- --ignored synthetic_meeting   # meeting test (downloads models)
 ```
 
-Linux potrzebuje: `libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev libasound2-dev
+Linux needs: `libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev libasound2-dev
 libdbus-1-dev libxdo-dev libclang-dev cmake`.
 
-macOS: aplikację trzeba podpisać z uprawnieniem `com.apple.security.device.audio-input`
-(`src-tauri/Entitlements.plist`). Bez niego przy hardened runtime mikrofon oddaje samą ciszę.
+macOS: the app must be signed with the `com.apple.security.device.audio-input` entitlement
+(`src-tauri/Entitlements.plist`). Without it, under hardened runtime the microphone returns silence.
 
-## Dane
+## Data
 
-`<katalog danych>/DyktandoX/` zawiera `models/`, `settings.json` i `Meetings/<data>/`, a w nich
-`meeting.json`, `audio/*.wav`, `transcript.md|json` i `summaries/`. Audio przepisanych spotkań jest
-usuwane po 30 dniach (do zmiany w ustawieniach); tekst zostaje.
+`<data directory>/DyktandoX/` contains `models/`, `settings.json` and `Meetings/<date>/`, each with
+`meeting.json`, `audio/*.wav`, `transcript.md|json` and `summaries/`. Audio of transcribed meetings
+is deleted after 30 days (configurable in settings); the text is kept.

@@ -35,7 +35,7 @@
       "icons/icon.ico"
     ],
     "category": "Productivity",
-    "shortDescription": "Dyktowanie po polsku na urządzeniu",
+    "shortDescription": "Polish dictation and meeting recording, on-device",
     "macOS": {
       "minimumSystemVersion": "13.0",
       "signingIdentity": "-",

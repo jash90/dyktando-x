@@ -26,7 +26,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - name: Zależności systemowe (Linux)
+      - name: System dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
@@ -43,10 +43,10 @@ jobs:
         with:
           workspaces: src-tauri
       - run: npm ci
-      # Podpis macOS (Developer ID) i notaryzacja tylko, gdy w repo są sekrety APPLE_*.
-      # Pusta zmienna APPLE_CERTIFICATE też uruchamia import certyfikatu (i błąd), więc
-      # przekazujemy je dalej wyłącznie wtedy, gdy mają wartość.
-      - name: Podpis macOS (jeśli skonfigurowany)
+      # macOS signing (Developer ID) and notarization only when the APPLE_* secrets exist.
+      # An empty APPLE_CERTIFICATE variable also triggers the certificate import (and fails),
+      # so the variables are forwarded only when they have a value.
+      - name: macOS signing (if configured)
         if: runner.os == 'macOS'
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -60,11 +60,11 @@ jobs:
             for v in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
               [ -n "${!v}" ] && echo "$v=${!v}" >> "$GITHUB_ENV"
             done
-            echo "Podpis macOS: włączony"
+            echo "macOS signing: enabled"
           else
-            echo "Podpis macOS: brak sekretów APPLE_* — paczka niepodpisana"
+            echo "macOS signing: no APPLE_* secrets — bundle left unsigned"
           fi
-      # Windows: bez certyfikatu do podpisu kodu SmartScreen ostrzega przy instalacji.
+      # Windows: without a code-signing certificate SmartScreen warns on install.
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
