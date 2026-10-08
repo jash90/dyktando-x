@@ -112,6 +112,7 @@ pub struct ProviderConfig {
 #[serde(default)]
 pub struct Settings {
     pub engine: EngineId,
+    /// Język dyktowania.
     pub language: Language,
     /// Nazwa urządzenia wejściowego; `None` = domyślne systemowe.
     pub input_device: Option<String>,
@@ -125,6 +126,8 @@ pub struct Settings {
     pub hud_enabled: bool,
 
     pub meeting_engine: EngineId,
+    /// Język spotkań (transkrypcja po nagraniu, na żywo, import; źródło tłumaczenia na żywo).
+    pub meeting_language: Language,
     /// Przepisuj wypowiedzi w trakcie nagrania (tekst pojawia się chwilę po każdej pauzie).
     pub meeting_live_transcription: bool,
     /// Kod języka tłumaczenia na żywo (np. „en”); pusty = bez tłumaczenia. Wymaga Canary.
@@ -157,6 +160,7 @@ impl Default for Settings {
             paste_mode: PasteMode::Auto,
             hud_enabled: true,
             meeting_engine: EngineId::ParakeetV3,
+            meeting_language: Language::Pl,
             meeting_live_transcription: true,
             meeting_live_translate_to: String::new(),
             meeting_live_window: true,
@@ -176,10 +180,19 @@ impl Default for Settings {
 
 impl Settings {
     pub fn load() -> Self {
-        std::fs::read(paths::settings_file())
-            .ok()
-            .and_then(|b| serde_json::from_slice(&b).ok())
-            .unwrap_or_default()
+        std::fs::read(paths::settings_file()).ok().and_then(|b| Self::parse(&b)).unwrap_or_default()
+    }
+
+    /// Plik sprzed osobnego języka spotkań: spotkania dostają dotychczasowy wspólny język,
+    /// żeby po aktualizacji działały tak samo jak wcześniej.
+    fn parse(bytes: &[u8]) -> Option<Self> {
+        let value: serde_json::Value = serde_json::from_slice(bytes).ok()?;
+        let has_meeting_language = value.get("meeting_language").is_some();
+        let mut s: Self = serde_json::from_value(value).ok()?;
+        if !has_meeting_language {
+            s.meeting_language = s.language;
+        }
+        Some(s)
     }
 
     pub fn save(&self) -> anyhow::Result<()> {
@@ -211,6 +224,14 @@ mod tests {
         assert_eq!(s.language, Language::Auto);
         assert_eq!(s.shortcut_push_to_talk, "F5");
         assert_eq!(s.meeting_audio_retention_days, 30);
+    }
+
+    #[test]
+    fn old_file_gives_meetings_the_shared_language() {
+        let s = Settings::parse(br#"{"language":"auto"}"#).unwrap();
+        assert_eq!((s.language, s.meeting_language), (Language::Auto, Language::Auto));
+        let s = Settings::parse(br#"{"language":"en","meeting_language":"pl"}"#).unwrap();
+        assert_eq!((s.language, s.meeting_language), (Language::En, Language::Pl));
     }
 
     #[test]

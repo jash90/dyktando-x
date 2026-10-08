@@ -1,5 +1,5 @@
 import type { PaneProps } from "./SettingsApp";
-import { ENGINE_LABELS, meetingsApi, TRANSLATION_TARGETS, type EngineId } from "../api";
+import { ENGINE_LABELS, meetingsApi, TRANSLATION_TARGETS, type EngineId, type Language } from "../api";
 import ShortcutRecorder from "../components/ShortcutRecorder";
 
 export default function MeetingsPane({ settings, update, env }: PaneProps) {
@@ -35,6 +35,18 @@ export default function MeetingsPane({ settings, update, env }: PaneProps) {
           czas nie gra roli.
         </p>
       </div>
+      <div className="row">
+        <label>Język spotkań</label>
+        <select value={settings.meeting_language} onChange={(e) => update({ meeting_language: e.target.value as Language })}>
+          <option value="pl">Polski</option>
+          <option value="en">Angielski</option>
+          <option value="auto">Automatycznie</option>
+        </select>
+        <p className="hint">
+          Niezależny od języka dyktowania. Dotyczy Whispera i Canary — przepisywania po nagraniu, na żywo i importowanych plików; Parakeet zawsze
+          rozpoznaje język sam. Przy rozmowach w jednym języku lepiej wybrać go wprost niż „Automatycznie”.
+        </p>
+      </div>
       <div className="row check">
         <label>
           <input
@@ -64,7 +76,7 @@ export default function MeetingsPane({ settings, update, env }: PaneProps) {
         </select>
         <p className="hint">
           Tłumaczy Canary 1B v2 (musi być pobrany) — między angielskim a pozostałymi językami, np. polski → angielski albo angielski → polski.
-          Język źródłowy to ustawienie „Język” z zakładki Dyktowanie. Każda wypowiedź jest dekodowana dwa razy, więc tekst pojawia się później
+          Język źródłowy to „Język spotkań” powyżej. Każda wypowiedź jest dekodowana dwa razy, więc tekst pojawia się później
           niż bez tłumaczenia.
         </p>
       </div>

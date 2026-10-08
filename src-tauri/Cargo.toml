@@ -1,6 +1,6 @@
 [package]
 name = "dyktando-x"
-version = "0.3.1"
+version = "0.3.2"
 description = "Polish dictation and meeting recording with local speech models"
 authors = ["you"]
 edition = "2021"

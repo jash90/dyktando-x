@@ -47,13 +47,16 @@ export default function DictationPane({ settings, update }: PaneProps) {
         <p className="hint">Model musi być pobrany w zakładce Modele. Parakeet jest najszybszy, Whisper sam stawia interpunkcję.</p>
       </div>
       <div className="row">
-        <label>Język</label>
+        <label>Język dyktowania</label>
         <select value={settings.language} onChange={(e) => update({ language: e.target.value as Language })}>
           <option value="pl">Polski</option>
           <option value="en">Angielski</option>
           <option value="auto">Automatycznie</option>
         </select>
-        <p className="hint">Parakeet zawsze rozpoznaje język sam; wybór dotyczy Whispera i Canary (Canary przy „Automatycznie” zakłada polski).</p>
+        <p className="hint">
+          Parakeet zawsze rozpoznaje język sam; wybór dotyczy Whispera i Canary (Canary przy „Automatycznie” zakłada polski). Język spotkań
+          ustawisz osobno w zakładce Spotkania.
+        </p>
       </div>
       <div className="row">
         <label>Wstawianie tekstu</label>

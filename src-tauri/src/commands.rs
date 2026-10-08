@@ -39,7 +39,7 @@ pub fn start_meeting_inner(app: &AppHandle) -> Result<Meeting, String> {
     let live = settings.meeting_live_transcription.then(|| {
         let app = app.clone();
         let translate_to = Some(settings.meeting_live_translate_to.trim().to_string()).filter(|t| !t.is_empty());
-        let config = live::Config { engine: settings.meeting_engine, language: settings.language, translate_to };
+        let config = live::Config { engine: settings.meeting_engine, language: settings.meeting_language, translate_to };
         let listener: crate::meetings::recorder::LiveListener = Box::new(move |id: &str, e: live::Event| {
             let (utterance, partial, error) = match e {
                 live::Event::Utterance(u) => (Some(u), None, None),

@@ -12,6 +12,7 @@ export interface ProviderConfig {
 
 export interface Settings {
   engine: EngineId;
+  /** Język dyktowania. */
   language: Language;
   input_device: string | null;
   shortcut_push_to_talk: string;
@@ -20,6 +21,8 @@ export interface Settings {
   paste_mode: PasteMode;
   hud_enabled: boolean;
   meeting_engine: EngineId;
+  /** Język spotkań (niezależny od dyktowania). */
+  meeting_language: Language;
   meeting_live_transcription: boolean;
   meeting_live_translate_to: string;
   meeting_live_window: boolean;
