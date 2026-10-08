@@ -29,7 +29,11 @@ export default function MeetingsPane({ settings, update, env }: PaneProps) {
             </option>
           ))}
         </select>
-        <p className="hint">Godzina nagrania: Parakeet ok. 2–5 min, Whisper turbo kilkanaście minut (zależnie od komputera).</p>
+        <p className="hint">
+          Godzina nagrania: Parakeet ok. 5 min, Whisper turbo ok. 12 min (Mac z Apple Silicon; na innych komputerach dłużej). Whisper turbo
+          robi w polskich rozmowach wyraźnie mniej błędów (ok. 8% słów zamiast 12%) i nie wtrąca angielskich słów — warto go wybrać, jeśli
+          czas nie gra roli.
+        </p>
       </div>
       <div className="row check">
         <label>
@@ -38,7 +42,7 @@ export default function MeetingsPane({ settings, update, env }: PaneProps) {
             checked={settings.meeting_live_transcription}
             onChange={(e) => update({ meeting_live_transcription: e.target.checked })}
           />
-          Przepisuj na żywo w trakcie nagrania (tekst pojawia się chwilę po każdej pauzie; najszybciej z Parakeetem)
+          Przepisuj na żywo w trakcie nagrania (tekst roboczy co ok. 1,5 s; najszybciej z Parakeetem)
         </label>
         <label>
           <input type="checkbox" checked={settings.meeting_live_window} onChange={(e) => update({ meeting_live_window: e.target.checked })} />

@@ -20,6 +20,12 @@ const MELS: usize = 80;
 /// Podobieństwo, powyżej którego dwie grupy to ten sam mówca (dobrane na nagraniach FLEURS).
 pub const SAME_SPEAKER: f32 = 0.45;
 const MIN_SECONDS_FOR_CLUSTER: f64 = 1.0;
+/// Grupa, w której łącznie mówi się krócej niż min(20 s, 15 % całej mowy), to nie osobny
+/// rozmówca, tylko niepewne wektory krótkich wtrąceń („mhm”, „okej”, kaszel) — na nagraniach
+/// rozmów takich „okruchów” było kilkadziesiąt (zob. `eval.rs`). Udział procentowy chroni
+/// krótkie nagrania, w których prawdziwy rozmówca mówi łącznie kilkanaście sekund.
+const MIN_GROUP_SECONDS: f64 = 20.0;
+const MIN_GROUP_SHARE: f64 = 0.15;
 
 /// Fbank w stylu Kaldi (jak w WeSpeaker): bez ditheru, usunięcie składowej stałej, preemfaza 0,97,
 /// okno Poveya, 80 pasm mel 20 Hz–8 kHz, log energii; na końcu odjęcie średniej (CMN).
@@ -176,11 +182,15 @@ pub fn cluster(items: &[(f64, Option<Vec<f32>>)], threshold: f32) -> Vec<Option<
         .collect();
     let mut groups: Vec<Vec<usize>> = long.iter().map(|&i| vec![i]).collect();
     let emb = |i: usize| items[i].1.as_ref().expect("wektor");
+    // Podobieństwa liczone raz (przy kilkuset wypowiedziach pętla niżej przechodzi po parach
+    // grup kilkaset razy).
+    let pos: std::collections::HashMap<usize, usize> = long.iter().enumerate().map(|(p, &i)| (i, p)).collect();
+    let sim: Vec<Vec<f32>> = long.iter().map(|&i| long.iter().map(|&j| cosine(emb(i), emb(j))).collect()).collect();
     let avg_sim = |a: &Vec<usize>, b: &Vec<usize>| -> f32 {
         let mut s = 0.0;
         for &i in a {
             for &j in b {
-                s += cosine(emb(i), emb(j));
+                s += sim[pos[&i]][pos[&j]];
             }
         }
         s / (a.len() * b.len()) as f32
@@ -199,19 +209,35 @@ pub fn cluster(items: &[(f64, Option<Vec<f32>>)], threshold: f32) -> Vec<Option<
         let merged = groups.remove(j);
         groups[i].extend(merged);
     }
-    // 2) centroidy i przypisanie wszystkich (także krótkich) do najbliższej grupy
-    let centroids: Vec<Vec<f32>> = groups
-        .iter()
-        .map(|g| {
-            let mut c = vec![0.0; emb(g[0]).len()];
-            for &i in g {
-                for (k, v) in emb(i).iter().enumerate() {
-                    c[k] += v;
-                }
+    let centroid = |g: &[usize]| {
+        let mut c = vec![0.0; emb(g[0]).len()];
+        for &i in g {
+            for (k, v) in emb(i).iter().enumerate() {
+                c[k] += v;
             }
-            normalize(c)
-        })
-        .collect();
+        }
+        normalize(c)
+    };
+    let nearest = |e: &[f32], centroids: &[Vec<f32>]| centroids.iter().enumerate().map(|(g, c)| (g, cosine(e, c))).max_by(|a, b| a.1.total_cmp(&b.1)).map(|(g, _)| g);
+    // 1b) okruchy → do najbliższej ugruntowanej grupy (każda wypowiedź osobno)
+    let seconds = |g: &[usize]| g.iter().map(|&i| items[i].0).sum::<f64>();
+    let total: f64 = groups.iter().map(|g| seconds(g)).sum();
+    let min_group = MIN_GROUP_SECONDS.min(MIN_GROUP_SHARE * total);
+    let (big, small): (Vec<Vec<usize>>, Vec<Vec<usize>>) = groups.into_iter().partition(|g| seconds(g) >= min_group);
+    let groups = if big.is_empty() {
+        small
+    } else {
+        let mut big = big;
+        let centroids: Vec<Vec<f32>> = big.iter().map(|g| centroid(g)).collect();
+        for i in small.into_iter().flatten() {
+            if let Some(g) = nearest(emb(i), &centroids) {
+                big[g].push(i);
+            }
+        }
+        big
+    };
+    // 2) centroidy i przypisanie pozostałych (krótkich) do najbliższej grupy
+    let centroids: Vec<Vec<f32>> = groups.iter().map(|g| centroid(g)).collect();
     let mut raw: Vec<Option<usize>> = vec![None; items.len()];
     for (g, members) in groups.iter().enumerate() {
         for &i in members {
@@ -221,12 +247,7 @@ pub fn cluster(items: &[(f64, Option<Vec<f32>>)], threshold: f32) -> Vec<Option<
     for (i, (_, e)) in items.iter().enumerate() {
         if raw[i].is_none() {
             if let Some(e) = e {
-                raw[i] = centroids
-                    .iter()
-                    .enumerate()
-                    .map(|(g, c)| (g, cosine(e, c)))
-                    .max_by(|a, b| a.1.total_cmp(&b.1))
-                    .map(|(g, _)| g);
+                raw[i] = nearest(e, &centroids);
             }
         }
     }
@@ -263,6 +284,40 @@ mod tests {
             (2.0, None),
         ];
         assert_eq!(cluster(&items, 0.5), vec![Some(0), Some(1), Some(0), Some(1), None]);
+    }
+
+    /// Dwie osoby po 30 s plus pojedyncze krótkie wtrącenia z „rozmytym” wektorem (poniżej progu
+    /// podobieństwa do kogokolwiek) — nie mogą zostać osobnymi rozmówcami.
+    #[test]
+    fn small_groups_are_absorbed_into_nearest_speaker() {
+        let mut items = Vec::new();
+        for _ in 0..10 {
+            items.push((3.0, v(&[1.0, 0.0, 0.0, 0.0])));
+            items.push((3.0, v(&[0.0, 1.0, 0.0, 0.0])));
+        }
+        items.push((1.5, v(&[0.6, 0.15, 0.78, 0.0]))); // bliżej A, ale poniżej progu
+        items.push((1.2, v(&[0.1, 0.5, 0.0, 0.86]))); // bliżej B
+        let got = cluster(&items, 0.45);
+        assert_eq!(got.iter().flatten().max(), Some(&1), "dokładnie 2 rozmówców: {got:?}");
+        assert_eq!(got[20], got[0]);
+        assert_eq!(got[21], got[1]);
+    }
+
+    /// Prawdziwy drugi głos, który mówi mało (jak pytanie z sali), zostaje osobnym rozmówcą.
+    #[test]
+    fn rare_but_distinct_speaker_is_kept() {
+        let mut items: Vec<(f64, Option<Vec<f32>>)> = (0..40).map(|_| (5.0, v(&[1.0, 0.0, 0.0]))).collect();
+        items.extend((0..3).map(|_| (8.0, v(&[0.05, 1.0, 0.0])))); // 24 s z 224 s
+        let got = cluster(&items, 0.45);
+        assert_eq!(got[40], Some(1), "{got:?}");
+        assert_eq!(got.iter().flatten().max(), Some(&1));
+    }
+
+    /// Krótkie nagranie (kilkanaście sekund na osobę) — udział procentowy chroni obu rozmówców.
+    #[test]
+    fn short_recording_keeps_both_speakers() {
+        let items = vec![(9.0, v(&[1.0, 0.0])), (9.0, v(&[0.0, 1.0])), (9.0, v(&[1.0, 0.05])), (9.0, v(&[0.05, 1.0]))];
+        assert_eq!(cluster(&items, 0.45), vec![Some(0), Some(1), Some(0), Some(1)]);
     }
 
     #[test]

@@ -22,10 +22,35 @@ pub struct Progress {
     pub fraction: f32,
 }
 
+/// Wypowiedź bez treści: same wypełniacze („uh”, „mm-hmm”, „yyy”) albo typowe zmyślenie silnika
+/// na krótkim dźwięku bez słów (oddech, kaszel, potaknięcie). Na nagraniach rozmów każda taka
+/// wypowiedź była osobnym „rozmówcą” albo wtrąceniem w obcym języku (zob. `eval.rs`).
+pub fn is_noise(text: &str, seconds: f64) -> bool {
+    const FILLERS: &[&str] = &["uh", "um", "umm", "uhm", "hm", "hmm", "mm", "mmm", "mhm", "hmhm", "yhm", "yyy", "yy", "y", "eee", "ee", "e", "ah", "eh", "oh"];
+    const HALLUCINATIONS: &[&str] = &[
+        "zobaczmy", "dziękuję", "dziękuję bardzo", "dziękuję za uwagę", "dziękuję za obejrzenie", "wszelkie prawa zastrzeżone",
+        "napisy", "subskrybuj", "thank you", "thanks", "you", "bye",
+    ];
+    let lower = text.to_lowercase();
+    let words: Vec<&str> = lower.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect();
+    if words.is_empty() || words.iter().all(|w| FILLERS.contains(w)) {
+        return true;
+    }
+    seconds < 2.0 && (HALLUCINATIONS.contains(&words.join(" ").as_str()) || words.iter().all(|w| w.chars().all(|c| c.is_ascii_digit())))
+}
+
 pub struct Options {
     pub engine: EngineId,
     pub language: Language,
     pub diarize: bool,
+    pub tuning: Tuning,
+}
+
+/// Parametry przetwarzania. Sprawdzone na nagraniach rozmów (`eval.rs`): dłuższe fragmenty,
+/// większy margines i normalizacja głośności nie zmniejszały błędów — zostają domyślne.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Tuning {
+    pub vad: vad::Params,
 }
 
 pub fn transcribe(store: &Store, id: &str, opts: &Options, cancel: &AtomicBool, mut progress: impl FnMut(Progress)) -> Result<TranscriptDocument> {
@@ -47,10 +72,10 @@ pub fn transcribe(store: &Store, id: &str, opts: &Options, cancel: &AtomicBool, 
 
     // 1) Wykrywanie mowy (szybkie: ~1–2 % czasu nagrania).
     progress(Progress { step: "Wykrywanie mowy (mikrofon)".into(), fraction: 0.0 });
-    let mic_segs = vad::segments(&vad::track_probabilities(&vad_model.file_path(0), &audio, MIC, &is_cancelled)?, vad::Params::default());
+    let mic_segs = vad::segments(&vad::track_probabilities(&vad_model.file_path(0), &audio, MIC, &is_cancelled)?, opts.tuning.vad);
     let sys_segs = if meeting.has_system_audio {
         progress(Progress { step: "Wykrywanie mowy (rozmówcy)".into(), fraction: 0.03 });
-        vad::segments(&vad::track_probabilities(&vad_model.file_path(0), &audio, SYSTEM, &is_cancelled)?, vad::Params::default())
+        vad::segments(&vad::track_probabilities(&vad_model.file_path(0), &audio, SYSTEM, &is_cancelled)?, opts.tuning.vad)
     } else {
         Vec::new()
     };
@@ -72,7 +97,7 @@ pub fn transcribe(store: &Store, id: &str, opts: &Options, cancel: &AtomicBool, 
     vad::for_each_segment(&audio, MIC, &mic_segs, |i, samples| {
         check()?;
         let text = engine.transcribe(samples, opts.language)?;
-        if !text.is_empty() {
+        if !is_noise(&text, mic_segs[i].1 - mic_segs[i].0) {
             mic.push(Utterance { start: mic_segs[i].0, end: mic_segs[i].1, track: Track::Mic, text, speaker: String::new(), translation: None });
         }
         done += 1;
@@ -85,8 +110,8 @@ pub fn transcribe(store: &Store, id: &str, opts: &Options, cancel: &AtomicBool, 
     vad::for_each_segment(&audio, SYSTEM, &sys_segs, |i, samples| {
         check()?;
         let text = engine.transcribe(samples, opts.language)?;
-        if !text.is_empty() {
-            let (start, end) = sys_segs[i];
+        let (start, end) = sys_segs[i];
+        if !is_noise(&text, end - start) {
             system.push(Utterance { start, end, track: Track::System, text, speaker: String::new(), translation: None });
             if let Some(e) = embedder.as_mut() {
                 voices.push((end - start, e.embed(samples).unwrap_or_else(|err| {
@@ -136,6 +161,22 @@ mod tests {
     use crate::meetings::store::State;
     use crate::meetings::writer::SegmentedWriter;
 
+    #[test]
+    fn noise_utterances() {
+        for t in ["Uh", "Um...", "Mm-hmm.", "Hmm", "Yyy...", ""] {
+            assert!(is_noise(t, 1.0), "{t:?}");
+        }
+        assert!(is_noise("Mhm, mhm.", 5.0), "same wypełniacze niezależnie od długości");
+        assert!(is_noise("Zobaczmy.", 0.8));
+        assert!(is_noise("Dziękuję.", 1.2));
+        assert!(is_noise("2", 0.6));
+        assert!(!is_noise("Dziękuję.", 3.5), "dłuższe „dziękuję” jest prawdziwe");
+        assert!(!is_noise("Okay.", 0.7), "potaknięcie słowem zostaje");
+        assert!(!is_noise("Tak, tak.", 0.9));
+        assert!(!is_noise("Zobaczmy, co tu mamy.", 1.5));
+        assert!(!is_noise("2009 rok", 1.0));
+    }
+
     fn load(name: &str) -> Vec<f32> {
         let p = format!("{}/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"));
         let mut r = hound::WavReader::open(p).unwrap();
@@ -181,7 +222,7 @@ mod tests {
         store.update(&meeting.id, |x| x.state = State::Recorded).unwrap();
 
         let t = std::time::Instant::now();
-        let opts = Options { engine: EngineId::ParakeetV3, language: Language::Pl, diarize: true };
+        let opts = Options { engine: EngineId::ParakeetV3, language: Language::Pl, diarize: true, tuning: Tuning::default() };
         let doc = transcribe(&store, &meeting.id, &opts, &AtomicBool::new(false), |_| {}).unwrap();
         let md = std::fs::read_to_string(store.transcript_md(&meeting.id)).unwrap();
         println!("{:.1} s nagrania w {:.1} s\n{md}", sys.len() as f64 / 16_000.0, t.elapsed().as_secs_f64());

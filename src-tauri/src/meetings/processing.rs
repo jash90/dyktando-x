@@ -111,7 +111,7 @@ pub async fn transcribe(app: AppHandle, id: String, engine: Option<EngineId>) ->
         })?;
         emit(&app, event(&id, JobKind::Transcribe, "Przygotowanie", 0.0));
         ensure_support_models(&app, &id, settings.meeting_diarization).await?;
-        let opts = Options { engine: engine.unwrap_or(settings.meeting_engine), language: settings.language, diarize: settings.meeting_diarization };
+        let opts = Options { engine: engine.unwrap_or(settings.meeting_engine), language: settings.language, diarize: settings.meeting_diarization, tuning: Default::default() };
         let (app2, id2, store2, cancel2) = (app.clone(), id.clone(), store.clone(), cancel.clone());
         let r = tauri::async_runtime::spawn_blocking(move || {
             transcriber::transcribe(&store2, &id2, &opts, &cancel2, |p| emit(&app2, event(&id2, JobKind::Transcribe, p.step, p.fraction)))

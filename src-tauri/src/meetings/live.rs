@@ -271,7 +271,7 @@ struct Draft {
 fn run(engine: &mut Engine, samples: &[f32], language: Language, translate_to: Option<&str>, last_run: &mut Duration) -> (Option<String>, Option<String>) {
     let t = Instant::now();
     let text = match engine.transcribe(samples, language) {
-        Ok(text) if !text.is_empty() => text,
+        Ok(text) if !super::transcriber::is_noise(&text, samples.len() as f64 / 16_000.0) => text,
         Ok(_) => return (None, None),
         Err(e) => {
             log::warn!("transkrypcja na żywo: {e}");
