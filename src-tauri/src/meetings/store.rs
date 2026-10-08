@@ -14,6 +14,8 @@ pub const SYSTEM: &str = "system";
 #[serde(rename_all = "snake_case")]
 pub enum State {
     Recording,
+    /// Wczytywanie pliku audio wskazanego przez użytkownika (import nagrania).
+    Importing,
     /// Aplikacja zamknęła się w trakcie nagrywania — pliki zostały.
     Interrupted,
     Recorded,
@@ -49,7 +51,7 @@ pub struct Meeting {
 impl Meeting {
     /// Czy da się przepisać (jest audio i nic akurat nie trwa).
     pub fn can_transcribe(&self) -> bool {
-        !self.audio_deleted && !matches!(self.state, State::Recording | State::Transcribing | State::Summarizing)
+        !self.audio_deleted && !matches!(self.state, State::Recording | State::Importing | State::Transcribing | State::Summarizing)
     }
 }
 
@@ -155,13 +157,13 @@ impl Store {
         let mut recovered = Vec::new();
         for m in self.all() {
             let new_state = match m.state {
-                State::Recording => Some(State::Interrupted),
+                State::Recording | State::Importing => Some(State::Interrupted),
                 State::Transcribing => Some(State::Recorded),
                 State::Summarizing => Some(State::Transcribed),
                 _ => None,
             };
             let Some(state) = new_state else { continue };
-            if m.state == State::Recording {
+            if matches!(m.state, State::Recording | State::Importing) {
                 for prefix in [MIC, SYSTEM] {
                     for p in super::writer::segments(&self.audio_folder(&m.id), prefix) {
                         if let Err(e) = super::writer::repair(&p) {
@@ -170,7 +172,9 @@ impl Store {
                     }
                 }
             }
-            let duration = super::writer::track_duration_samples(&self.audio_folder(&m.id), MIC) as f64 / 16_000.0;
+            let audio = self.audio_folder(&m.id);
+            let samples = super::writer::track_duration_samples(&audio, MIC).max(super::writer::track_duration_samples(&audio, SYSTEM));
+            let duration = samples as f64 / 16_000.0;
             let _ = self.update(&m.id, |x| {
                 x.state = state;
                 if x.duration_seconds == 0.0 {

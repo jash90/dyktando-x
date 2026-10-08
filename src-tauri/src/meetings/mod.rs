@@ -1,6 +1,7 @@
 //! Nagrywanie spotkań: dwie ścieżki → transkrypcja z mówcami → podsumowanie AI.
 pub mod detector;
 pub mod diarize;
+pub mod import;
 pub mod live;
 pub mod processing;
 pub mod recorder;

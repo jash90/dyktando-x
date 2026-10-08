@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { AlertTriangle, Circle, FileText, FolderOpen, Mic, Pencil, Sparkles, Square, Trash2, Wand2, X } from "lucide-react";
+import { AlertTriangle, Circle, FileAudio, FileText, FolderOpen, Mic, Pencil, Sparkles, Square, Trash2, Wand2, X } from "lucide-react";
 import {
   aiApi,
   api,
@@ -102,6 +102,17 @@ export default function MeetingsApp() {
     refreshList();
   };
 
+  const importFile = async () => {
+    setError(null);
+    try {
+      const m = await meetingsApi.importFile();
+      if (m) setSelected(m.id);
+    } catch (e) {
+      setError(String(e));
+    }
+    refreshList();
+  };
+
   return (
     <div className="layout meetings">
       <nav className="sidebar meeting-list">
@@ -110,9 +121,12 @@ export default function MeetingsApp() {
           {status?.recording ? <Square size={14} fill="currentColor" /> : <Circle size={14} fill="currentColor" />}
           {status?.recording ? `Zatrzymaj · ${clock(status.seconds)}` : "Nagraj spotkanie"}
         </button>
+        <button className="import" onClick={importFile} title="Plik z nagraniem rozmowy (MP3, M4A, WAV, FLAC, OGG, Opus…) — zostanie przepisany jak spotkanie">
+          <FileAudio size={14} /> Importuj nagranie
+        </button>
         {status?.recording && status.warning && <div className="hint warn-text">{status.warning}</div>}
         <div className="list">
-          {meetings.length === 0 && <div className="hint">Brak nagrań. Kliknij „Nagraj spotkanie” albo użyj skrótu z ustawień.</div>}
+          {meetings.length === 0 && <div className="hint">Brak nagrań. Kliknij „Nagraj spotkanie”, użyj skrótu z ustawień albo zaimportuj plik z nagraniem.</div>}
           {meetings.map((m) => (
             <button key={m.id} className={`item ${selected === m.id ? "active" : ""}`} onClick={() => setSelected(m.id)}>
               <span className="item-title">{m.title || shortDate(m.startedAt)}</span>

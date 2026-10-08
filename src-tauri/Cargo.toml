@@ -1,6 +1,6 @@
 [package]
 name = "dyktando-x"
-version = "0.2.2"
+version = "0.3.0"
 description = "Polish dictation and meeting recording with local speech models"
 authors = ["you"]
 edition = "2021"
@@ -48,7 +48,9 @@ tauri-plugin-single-instance = "2.5.2"
 rustfft = "6.4.1"
 ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "ndarray"] }
 ndarray = "0.17.2"
+symphonia = { version = "0.6.1", features = ["mp3", "aac", "isomp4", "alac", "aiff", "caf"] }
 tauri-plugin-autostart = "2.7.0"
+symphonia-adapter-libopus = "0.3.0"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

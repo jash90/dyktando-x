@@ -168,6 +168,24 @@ pub fn reveal_meeting(app: AppHandle, id: String) -> Result<(), String> {
     app.opener().reveal_item_in_dir(target).map_err(|e| e.to_string())
 }
 
+/// Okno wyboru pliku z nagraniem rozmowy → nowe spotkanie (wczytanie i transkrypcja w tle).
+/// `None` = użytkownik zamknął okno bez wyboru.
+#[tauri::command]
+pub async fn import_meeting(app: AppHandle) -> Result<Option<Meeting>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let picked = app
+        .dialog()
+        .file()
+        .set_title("Wybierz nagranie rozmowy")
+        .add_filter("Nagrania audio", crate::meetings::import::EXTENSIONS)
+        .blocking_pick_file();
+    let Some(file) = picked else { return Ok(None) };
+    let path = file.into_path().map_err(|e| e.to_string())?;
+    let meeting = processing::import_file(app.clone(), path).map_err(|e| e.to_string())?;
+    changed(&app);
+    Ok(Some(meeting))
+}
+
 #[tauri::command]
 pub async fn transcribe_meeting(app: AppHandle, id: String, engine: Option<EngineId>) -> Result<(), String> {
     processing::transcribe(app, id, engine).await.map_err(|e| e.to_string())

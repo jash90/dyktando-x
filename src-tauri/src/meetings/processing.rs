@@ -7,7 +7,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager};
 
-use super::store::{State, Store};
+use super::import;
+use super::store::{Meeting, State, Store};
 use super::transcriber::{self, Options};
 use crate::ai::{keys, provider::LlmConfig, summarizer};
 use crate::models::{self, AssetId, EngineId};
@@ -17,6 +18,7 @@ use crate::AppState;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum JobKind {
+    Import,
     Transcribe,
     Summarize,
 }
@@ -199,6 +201,48 @@ pub async fn summarize(app: AppHandle, id: String, provider: ProviderId, model: 
 fn finish(app: &AppHandle, id: &str, kind: JobKind, error: Option<String>) {
     emit(app, JobEvent { meeting_id: id.into(), kind, step: if error.is_some() { "Błąd".into() } else { "Gotowe".into() }, fraction: 1.0, finished: true, error });
     let _ = app.emit("meetings-changed", ());
+}
+
+/// Import nagrania z pliku: tworzy spotkanie od razu (żeby pojawiło się na liście), a w tle
+/// wczytuje plik z postępem, potem przepisuje i — jeśli włączone — podsumowuje.
+pub fn import_file(app: AppHandle, path: std::path::PathBuf) -> Result<Meeting> {
+    let store = Store::default();
+    let meeting = import::create(&store, &path)?;
+    let cancel = match app.state::<AppState>().jobs.begin(&meeting.id, JobKind::Import) {
+        Ok(c) => c,
+        Err(e) => {
+            let _ = store.delete(&meeting.id);
+            return Err(e);
+        }
+    };
+    let (m, id) = (meeting.clone(), meeting.id.clone());
+    tauri::async_runtime::spawn(async move {
+        emit(&app, event(&id, JobKind::Import, "Wczytywanie pliku", 0.0));
+        let (app2, id2) = (app.clone(), id.clone());
+        let r = tauri::async_runtime::spawn_blocking(move || {
+            // Postęp co 1 % — przy długim pliku pakietów są dziesiątki tysięcy.
+            let mut shown = 0.0f32;
+            import::fill(&store, &m, &path, &cancel, |f| {
+                if f - shown >= 0.01 {
+                    shown = f;
+                    emit(&app2, event(&id2, JobKind::Import, "Wczytywanie pliku", f));
+                }
+            })
+        })
+        .await
+        .map_err(|e| anyhow!("{e}"))
+        .and_then(|r| r);
+        app.state::<AppState>().jobs.end();
+        finish(&app, &id, JobKind::Import, r.as_ref().err().map(|e| e.to_string()));
+        if r.is_err() {
+            return;
+        }
+        let settings = app.state::<AppState>().settings.lock().unwrap().clone();
+        if transcribe(app.clone(), id.clone(), None).await.is_ok() && settings.meeting_auto_summarize && keys::has(settings.ai_provider) {
+            let _ = summarize(app, id, settings.ai_provider, None).await;
+        }
+    });
+    Ok(meeting)
 }
 
 /// Po zatrzymaniu nagrania: transkrypcja (jeśli włączona), potem podsumowanie (jeśli włączone

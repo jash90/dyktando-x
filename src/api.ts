@@ -119,6 +119,7 @@ export const ENGINE_LABELS: Record<EngineId, string> = {
 
 export type MeetingState =
   | "recording"
+  | "importing"
   | "interrupted"
   | "recorded"
   | "transcribing"
@@ -197,7 +198,7 @@ export function draftList(drafts: LiveDrafts): Utterance[] {
 
 export interface JobEvent {
   meeting_id: string;
-  kind: "transcribe" | "summarize";
+  kind: "import" | "transcribe" | "summarize";
   step: string;
   fraction: number;
   finished: boolean;
@@ -224,6 +225,8 @@ export const meetingsApi = {
   rename: (id: string, title: string) => invoke<void>("rename_meeting", { id, title }),
   remove: (id: string) => invoke<void>("delete_meeting", { id }),
   reveal: (id: string) => invoke<void>("reveal_meeting", { id }),
+  /** Okno wyboru pliku z nagraniem; `null` = anulowano. Wczytanie i transkrypcja idą w tle. */
+  importFile: () => invoke<Meeting | null>("import_meeting"),
   transcribe: (id: string, engine?: EngineId) => invoke<void>("transcribe_meeting", { id, engine: engine ?? null }),
   summarize: (id: string, provider: ProviderId, model?: string) =>
     invoke<void>("summarize_meeting", { id, provider, model: model ?? null }),
@@ -242,6 +245,7 @@ export const aiApi = {
 
 export const STATE_LABELS: Record<MeetingState, string> = {
   recording: "nagrywane",
+  importing: "wczytywanie…",
   interrupted: "przerwane",
   recorded: "nagrane",
   transcribing: "przepisywanie…",

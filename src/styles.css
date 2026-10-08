@@ -93,6 +93,7 @@ html.hud-root, html.hud-root body { background: transparent; }
 .record { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 9px 12px; font-weight: 600; border-radius: 8px;
   background: var(--accent); border-color: var(--accent); color: #fff; }
 .record.on { background: var(--panel); color: var(--accent); }
+.import { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 7px 12px; margin-top: 6px; border-radius: 8px; }
 .record.on svg { animation: pulse 1.2s infinite; }
 .warn-text { color: var(--warn-text); background: var(--warn-bg); padding: 6px 8px; border-radius: 6px; }
 .list { display: flex; flex-direction: column; gap: 2px; overflow-y: auto; margin-top: 6px; }
