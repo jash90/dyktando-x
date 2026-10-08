@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { FileText, Square, X } from "lucide-react";
-import { clock, meetingsApi, type LivePayload, type RecordingStatus, type Utterance } from "../api";
+import { clock, draftList, meetingsApi, nextDrafts, type LiveDrafts, type LivePayload, type RecordingStatus, type Utterance } from "../api";
 
 /** Ile ostatnich wypowiedzi trzymamy w małym oknie. */
 const KEEP = 60;
@@ -10,6 +10,7 @@ const KEEP = 60;
 export default function LiveWindow() {
   const [status, setStatus] = useState<RecordingStatus | null>(null);
   const [items, setItems] = useState<Utterance[]>([]);
+  const [drafts, setDrafts] = useState<LiveDrafts>({});
   const [liveError, setLiveError] = useState<string | null>(null);
   const end = useRef<HTMLDivElement>(null);
 
@@ -21,6 +22,7 @@ export default function LiveWindow() {
       listen<LivePayload>("meeting-live", (e) => {
         const { utterance, error } = e.payload;
         if (utterance) setItems((prev) => [...prev, utterance].sort((a, b) => a.start - b.start).slice(-KEEP));
+        setDrafts((prev) => nextDrafts(prev, e.payload));
         if (error) setLiveError(error);
       }),
       listen("meetings-changed", () => {
@@ -28,6 +30,7 @@ export default function LiveWindow() {
           setStatus(s);
           if (!s.recording) {
             setItems([]);
+            setDrafts({});
             setLiveError(null);
           } else {
             meetingsApi.liveTranscript().then(setItems);
@@ -40,7 +43,7 @@ export default function LiveWindow() {
 
   useEffect(() => {
     end.current?.scrollIntoView({ block: "nearest" });
-  }, [items.length]);
+  }, [items.length, drafts]);
 
   const recording = !!status?.recording;
   return (
@@ -68,9 +71,9 @@ export default function LiveWindow() {
       {status?.warning && <div className="live-warn">{status.warning}</div>}
       {liveError && <div className="live-warn">Transkrypcja na żywo niedostępna: {liveError}</div>}
       <div className="live-body">
-        {items.length === 0 && !liveError && <p className="hint">{recording ? "Słucham… tekst pojawi się po pierwszej pauzie w mowie." : "Nic nie jest nagrywane."}</p>}
-        {items.map((u) => (
-          <div key={`${u.track}-${u.start}`} className="live-line">
+        {items.length === 0 && draftList(drafts).length === 0 && !liveError && <p className="hint">{recording ? "Słucham…" : "Nic nie jest nagrywane."}</p>}
+        {[...items, ...draftList(drafts)].map((u, i) => (
+          <div key={`${u.track}-${u.start}-${i >= items.length ? "draft" : ""}`} className={`live-line${i >= items.length ? " draft" : ""}`}>
             <b className={u.track === "mic" ? "me" : ""}>{u.speaker}:</b>
             {u.text}
             {u.translation && <div className="live-translation">{u.translation}</div>}

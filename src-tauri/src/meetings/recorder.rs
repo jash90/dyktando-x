@@ -22,26 +22,94 @@ use crate::audio::resample::StreamResampler;
 /// Luka większa niż to (w próbkach 16 kHz) jest wypełniana ciszą.
 const GAP_TOLERANCE: u64 = RATE as u64 / 2;
 
+/// Pilnuje, czy źródło naprawdę daje tyle próbek na sekundę, ile zgłosiło. Gdy zgłoszona
+/// częstotliwość jest zła (np. macOS: tap 48 kHz, wyjście 16 kHz), resampler gubi część dźwięku,
+/// a wypełnianie luk wstawia co chwilę ciszę — mowa robi się nierozpoznawalna. Czysta logika:
+/// czas podaje wołający.
+pub struct RateWatch {
+    declared: u32,
+    since: Option<f64>,
+    last: f64,
+    frames: u64,
+}
+
+impl RateWatch {
+    /// Okno pomiaru (s).
+    const WINDOW: f64 = 3.0;
+    /// Przerwa w dostawach dłuższa niż to zaczyna pomiar od nowa (WASAPI loopback w ciszy nie
+    /// wysyła nic — to nie jest zła częstotliwość).
+    const STALL: f64 = 0.25;
+    const TOLERANCE: f64 = 0.08;
+    const STANDARD: [u32; 9] = [8_000, 11_025, 16_000, 22_050, 24_000, 32_000, 44_100, 48_000, 96_000];
+
+    pub fn new(declared: u32) -> Self {
+        Self { declared, since: None, last: 0.0, frames: 0 }
+    }
+
+    /// `frames` próbek (mono, przed resamplingiem) przyszło w chwili `now` (s). Zwraca nową
+    /// częstotliwość, jeśli zmierzona wyraźnie różni się od zgłoszonej.
+    pub fn push(&mut self, frames: usize, now: f64) -> Option<u32> {
+        let since = match self.since {
+            Some(s) if (0.0..=Self::STALL).contains(&(now - self.last)) => s,
+            _ => {
+                // Pierwsza porcja (albo po przerwie) wyznacza początek okna — jej próbek nie liczymy.
+                self.since = Some(now);
+                self.last = now;
+                self.frames = 0;
+                return None;
+            }
+        };
+        self.last = now;
+        self.frames += frames as u64;
+        let elapsed = now - since;
+        if elapsed < Self::WINDOW {
+            return None;
+        }
+        let measured = self.frames as f64 / elapsed;
+        self.since = Some(now);
+        self.frames = 0;
+        let declared = self.declared as f64;
+        if (measured - declared).abs() / declared <= Self::TOLERANCE {
+            return None;
+        }
+        let snapped = Self::STANDARD.into_iter().min_by(|a, b| (*a as f64 - measured).abs().total_cmp(&(*b as f64 - measured).abs()))?;
+        if (snapped as f64 - measured).abs() / measured > Self::TOLERANCE || snapped == self.declared {
+            return None;
+        }
+        self.declared = snapped;
+        Some(snapped)
+    }
+}
+
 struct Track {
     writer: Option<SegmentedWriter>,
     resampler: Option<StreamResampler>,
     started: Instant,
     error: Option<String>,
     live: Option<(Arc<Live>, transcript::Track)>,
+    watch: Option<RateWatch>,
     /// Szczytowy RMS od ostatniego odczytu (bity f32) — wskaźnik „sygnał jest” w oknie na żywo.
     peak: Arc<AtomicU32>,
 }
 
 impl Track {
     fn new(writer: SegmentedWriter, started: Instant, live: Option<(Arc<Live>, transcript::Track)>) -> Self {
-        Self { writer: Some(writer), resampler: None, started, error: None, live, peak: Arc::new(AtomicU32::new(0)) }
+        Self { writer: Some(writer), resampler: None, started, error: None, live, watch: None, peak: Arc::new(AtomicU32::new(0)) }
     }
 
     fn set_rate(&mut self, rate: u32) {
         self.resampler = StreamResampler::new(rate).map_err(|e| self.error = Some(e.to_string())).ok();
+        self.watch = Some(RateWatch::new(rate));
     }
 
     fn push(&mut self, samples: &[f32]) {
+        let now = self.started.elapsed().as_secs_f64();
+        if let Some(rate) = self.watch.as_mut().and_then(|w| w.push(samples.len(), now)) {
+            log::warn!("Źródło daje {rate} Hz zamiast zgłoszonych — przestawiam przeliczanie");
+            let watch = self.watch.take();
+            self.set_rate(rate);
+            self.watch = watch;
+        }
         let (Some(r), Some(w)) = (self.resampler.as_mut(), self.writer.as_mut()) else { return };
         let out = r.push(samples);
         if let Some((live, kind)) = &self.live {
@@ -321,6 +389,58 @@ impl Recorder {
         })?;
         log::info!("Koniec nagrania {} ({:.0} s)", meeting.id, seconds);
         Ok(meeting)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RateWatch;
+
+    /// Porcje co 10 ms przez `secs` sekund, `rate` próbek/s; zwraca pierwszą zgłoszoną zmianę.
+    fn feed(w: &mut RateWatch, rate: f64, from: f64, secs: f64, jitter: bool) -> Option<u32> {
+        let mut t = from;
+        let mut i = 0;
+        while t < from + secs {
+            let n = (rate * 0.01 * if jitter && i % 2 == 0 { 1.03 } else if jitter { 0.97 } else { 1.0 }) as usize;
+            if let Some(r) = w.push(n, t) {
+                return Some(r);
+            }
+            t += 0.01;
+            i += 1;
+        }
+        None
+    }
+
+    #[test]
+    fn detects_16k_declared_as_48k() {
+        let mut w = RateWatch::new(48_000);
+        assert_eq!(feed(&mut w, 16_000.0, 0.0, 4.0, false), Some(16_000));
+        assert_eq!(feed(&mut w, 16_000.0, 4.0, 8.0, false), None, "po przestawieniu bez kolejnych zmian");
+    }
+
+    #[test]
+    fn jitter_is_not_a_rate_change() {
+        let mut w = RateWatch::new(48_000);
+        assert_eq!(feed(&mut w, 48_000.0, 0.0, 10.0, true), None);
+    }
+
+    #[test]
+    fn snaps_to_44100() {
+        let mut w = RateWatch::new(48_000);
+        assert_eq!(feed(&mut w, 44_100.0, 0.0, 4.0, false), Some(44_100));
+    }
+
+    #[test]
+    fn stalls_restart_the_window() {
+        // Dostawy 0,1 s co 0,5 s (WASAPI w ciszy) — średnio mało próbek, ale to nie zła częstotliwość.
+        let mut w = RateWatch::new(48_000);
+        let mut t = 0.0;
+        for _ in 0..40 {
+            for k in 0..10 {
+                assert_eq!(w.push(480, t + k as f64 * 0.01), None);
+            }
+            t += 0.5;
+        }
     }
 }
 

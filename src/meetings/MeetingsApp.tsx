@@ -5,12 +5,15 @@ import {
   aiApi,
   api,
   clock,
+  draftList,
   ENGINE_LABELS,
   meetingsApi,
+  nextDrafts,
   shortDate,
   STATE_LABELS,
   type EngineId,
   type JobEvent,
+  type LiveDrafts,
   type LivePayload,
   type Meeting,
   type MeetingDetail,
@@ -31,6 +34,7 @@ export default function MeetingsApp() {
   const [job, setJob] = useState<JobEvent | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [live, setLive] = useState<Utterance[]>([]);
+  const [drafts, setDrafts] = useState<LiveDrafts>({});
   const [liveError, setLiveError] = useState<string | null>(null);
 
   const refreshList = useCallback(() => meetingsApi.list().then(setMeetings), []);
@@ -55,6 +59,7 @@ export default function MeetingsApp() {
       listen<LivePayload>("meeting-live", (e) => {
         const { utterance, error: err } = e.payload;
         if (utterance) setLive((prev) => [...prev, utterance].sort((a, b) => a.start - b.start));
+        setDrafts((prev) => nextDrafts(prev, e.payload));
         if (err) setLiveError(err);
       }),
     ];
@@ -67,6 +72,7 @@ export default function MeetingsApp() {
       meetingsApi.liveTranscript().then((u) => setLive((prev) => (prev.length > u.length ? prev : u)));
     } else {
       setLive([]);
+      setDrafts({});
       setLiveError(null);
     }
   }, [status?.recording, status?.meeting_id]);
@@ -132,7 +138,7 @@ export default function MeetingsApp() {
             detail={detail}
             job={job?.meeting_id === detail.meeting.id ? job : null}
             busy={!!job}
-            live={status?.recording && status.meeting_id === detail.meeting.id ? { items: live, error: liveError } : null}
+            live={status?.recording && status.meeting_id === detail.meeting.id ? { items: live, drafts: draftList(drafts), error: liveError } : null}
             onError={setError}
             onChanged={refreshList}
           />
@@ -158,7 +164,7 @@ function Detail({
   detail: MeetingDetail;
   job: JobEvent | null;
   busy: boolean;
-  live: { items: Utterance[]; error: string | null } | null;
+  live: { items: Utterance[]; drafts: Utterance[]; error: string | null } | null;
   onError: (e: string | null) => void;
   onChanged: () => void;
 }) {
@@ -337,7 +343,7 @@ function Detail({
           ))}
         {tab === "transcript" &&
           (live ? (
-            <LiveTranscript items={live.items} error={live.error} />
+            <LiveTranscript items={live.items} drafts={live.drafts} error={live.error} />
           ) : detail.transcript ? (
             <Markdown text={detail.transcript} />
           ) : (
@@ -352,21 +358,22 @@ function liveText(items: Utterance[]): string {
   return items.map((u) => `[${clock(u.start)}] ${u.speaker}: ${u.text}${u.translation ? `\n    ${u.translation}` : ""}`).join("\n");
 }
 
-/// Transkrypcja na żywo: wypowiedzi pojawiają się chwilę po każdej pauzie, widok sam przewija do końca.
-function LiveTranscript({ items, error }: { items: Utterance[]; error: string | null }) {
+/// Transkrypcja na żywo: domknięte wypowiedzi i (szarym) tekst roboczy trwających — odświeżany co
+/// ~1,5 s, bez czekania na pauzę. Widok sam przewija do końca.
+function LiveTranscript({ items, drafts, error }: { items: Utterance[]; drafts: Utterance[]; error: string | null }) {
   const end = useRef<HTMLDivElement>(null);
   useEffect(() => {
     end.current?.scrollIntoView({ block: "nearest" });
-  }, [items.length]);
+  }, [items.length, drafts]);
   return (
     <div className="live">
       <p className="hint">
         <span className="live-dot" /> Na żywo — tekst tymczasowy, bez rozpoznawania rozmówców. Pełny transkrypt powstanie po zakończeniu nagrania.
       </p>
       {error && <div className="error">Transkrypcja na żywo niedostępna: {error}</div>}
-      {items.length === 0 && !error && <p className="hint">Słucham…</p>}
-      {items.map((u) => (
-        <div key={`${u.track}-${u.start}`} className="live-line">
+      {items.length === 0 && drafts.length === 0 && !error && <p className="hint">Słucham…</p>}
+      {[...items, ...drafts].map((u, i) => (
+        <div key={`${u.track}-${u.start}-${i >= items.length ? "draft" : ""}`} className={`live-line${i >= items.length ? " draft" : ""}`}>
           <time>{clock(u.start)}</time>
           <b className={u.track === "mic" ? "me" : ""}>{u.speaker}:</b> {u.text}
           {u.translation && <div className="live-translation">{u.translation}</div>}

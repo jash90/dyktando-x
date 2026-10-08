@@ -158,6 +158,7 @@ textarea { width: 100%; font: inherit; font-size: 12.5px; padding: 10px; border-
 .live-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); margin-right: 6px; animation: live-pulse 1.2s ease-in-out infinite; vertical-align: 0; }
 @keyframes live-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
 .live-translation { color: var(--muted); font-style: italic; margin-left: 52px; }
+.live-line.draft { color: var(--muted); }
 
 /* Okno „na żywo” przy nagrywaniu spotkania */
 .live-win { margin: 6px; height: calc(100vh - 12px); display: flex; flex-direction: column; border-radius: 12px; background: var(--panel);

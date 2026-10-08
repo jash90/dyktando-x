@@ -71,9 +71,15 @@ fn own_process_object() -> Option<AudioObjectID> {
     obj.ok().filter(|o| *o != kAudioObjectUnknown)
 }
 
+/// UID wyjścia, na którym grają aplikacje (Meet, Zoom, Teams). Urządzenie „dźwięków systemowych”
+/// bywa inne (np. wirtualne Background Music) i ma inną częstotliwość — tylko jako zapas.
 fn default_output_uid() -> Result<String> {
+    output_uid(kAudioHardwarePropertyDefaultOutputDevice).or_else(|_| output_uid(kAudioHardwarePropertyDefaultSystemOutputDevice))
+}
+
+fn output_uid(selector: u32) -> Result<String> {
     unsafe {
-        let device = get_property::<AudioObjectID>(kAudioObjectSystemObject as u32, kAudioHardwarePropertyDefaultSystemOutputDevice, None, 0)
+        let device = get_property::<AudioObjectID>(kAudioObjectSystemObject as u32, selector, None, 0)
             .map_err(|s| anyhow!("Dźwięk systemowy: brak domyślnego wyjścia (błąd {s})"))?;
         let uid = get_property::<*const NSString>(device, kAudioDevicePropertyDeviceUID, None, std::ptr::null())
             .map_err(|s| anyhow!("Dźwięk systemowy: brak UID wyjścia (błąd {s})"))?;
@@ -142,7 +148,7 @@ impl Capture {
 
         let asbd = get_property::<AudioStreamBasicDescription>(tap, kAudioTapPropertyFormat, None, std::mem::zeroed())
             .map_err(|s| anyhow!("Dźwięk systemowy: brak formatu tapu (błąd {s})"))?;
-        let rate = asbd.mSampleRate.round() as u32;
+        let tap_rate = asbd.mSampleRate.round() as u32;
         let channels = asbd.mChannelsPerFrame.max(1) as usize;
         let non_interleaved = asbd.mFormatFlags & kAudioFormatFlagIsNonInterleaved != 0;
         if asbd.mBitsPerChannel != 32 {
@@ -169,6 +175,12 @@ impl Capture {
         let mut aggregate = kAudioObjectUnknown;
         check(AudioHardwareCreateAggregateDevice(cf, NonNull::from(&mut aggregate)), "nie udało się utworzyć urządzenia zbiorczego")?;
         self.aggregate = aggregate;
+        // Bufory przychodzą w takcie urządzenia zbiorczego (tap jest do niego dopasowywany), nie
+        // w formacie tapu: z wyjściem 16 kHz i tapem 48 kHz liczenie po tapie gubiło 2/3 dźwięku.
+        let rate = match get_property::<f64>(aggregate, kAudioDevicePropertyNominalSampleRate, None, 0.0) {
+            Ok(r) if r > 0.0 => r.round() as u32,
+            _ => tap_rate,
+        };
 
         let sink = Mutex::new(sink);
         let mut mono: Vec<f32> = Vec::new();
@@ -190,7 +202,9 @@ impl Capture {
                         *o += s / n;
                     }
                 }
-            } else if let Some(b) = buffers.first() {
+            } else if let Some(b) = buffers.last() {
+                // Tap to ostatni strumień wejściowy urządzenia zbiorczego (wyjście z mikrofonem,
+                // np. słuchawki, dokłada własny strumień przed nim).
                 if b.mData.is_null() { return; }
                 let ch = (b.mNumberChannels as usize).max(1).min(channels.max(1));
                 let data = std::slice::from_raw_parts(b.mData as *const f32, b.mDataByteSize as usize / 4);
@@ -208,7 +222,7 @@ impl Capture {
         self._block = Some(block);
         self._queue = Some(queue);
         check(AudioDeviceStart(aggregate, proc_id), "nie udało się wystartować")?;
-        log::info!("Tap systemowy: {rate} Hz, {channels} kan., wyjście {output}");
+        log::info!("Tap systemowy: tap {tap_rate} Hz, urządzenie zbiorcze {rate} Hz, {channels} kan., wyjście {output}");
         Ok(rate)
     }
 

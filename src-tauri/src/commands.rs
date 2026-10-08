@@ -28,6 +28,8 @@ fn changed(app: &AppHandle) {
 pub struct LivePayload {
     meeting_id: String,
     utterance: Option<Utterance>,
+    /// Tekst roboczy trwającej wypowiedzi (zastępuje poprzedni roboczy tej ścieżki; pusty = usuń).
+    partial: Option<Utterance>,
     error: Option<String>,
 }
 
@@ -39,11 +41,12 @@ pub fn start_meeting_inner(app: &AppHandle) -> Result<Meeting, String> {
         let translate_to = Some(settings.meeting_live_translate_to.trim().to_string()).filter(|t| !t.is_empty());
         let config = live::Config { engine: settings.meeting_engine, language: settings.language, translate_to };
         let listener: crate::meetings::recorder::LiveListener = Box::new(move |id: &str, e: live::Event| {
-            let (utterance, error) = match e {
-                live::Event::Utterance(u) => (Some(u), None),
-                live::Event::Error(m) => (None, Some(m)),
+            let (utterance, partial, error) = match e {
+                live::Event::Utterance(u) => (Some(u), None, None),
+                live::Event::Partial(u) => (None, Some(u), None),
+                live::Event::Error(m) => (None, None, Some(m)),
             };
-            let _ = app.emit("meeting-live", LivePayload { meeting_id: id.to_string(), utterance, error });
+            let _ = app.emit("meeting-live", LivePayload { meeting_id: id.to_string(), utterance, partial, error });
         });
         (config, listener)
     });

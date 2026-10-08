@@ -169,7 +169,30 @@ export interface Utterance {
 export interface LivePayload {
   meeting_id: string;
   utterance: Utterance | null;
+  /** Tekst roboczy trwającej wypowiedzi danej ścieżki; pusty tekst = usuń roboczy. */
+  partial: Utterance | null;
   error: string | null;
+}
+
+/** Teksty robocze trwających wypowiedzi, po jednym na ścieżkę. */
+export type LiveDrafts = Partial<Record<Utterance["track"], Utterance>>;
+
+/** Nowy stan tekstów roboczych po zdarzeniu `meeting-live`: domknięta wypowiedź zastępuje
+ *  roboczy swojej ścieżki, roboczy z pustym tekstem go usuwa. */
+export function nextDrafts(prev: LiveDrafts, { utterance, partial }: LivePayload): LiveDrafts {
+  const done = utterance ?? (partial && !partial.text ? partial : null);
+  if (done) {
+    const { [done.track]: _, ...rest } = prev;
+    return rest;
+  }
+  return partial ? { ...prev, [partial.track]: partial } : prev;
+}
+
+/** Robocze w kolejności czasu — do wyświetlenia za domkniętymi wypowiedziami. */
+export function draftList(drafts: LiveDrafts): Utterance[] {
+  return Object.values(drafts)
+    .filter((u): u is Utterance => !!u)
+    .sort((a, b) => a.start - b.start);
 }
 
 export interface JobEvent {
