@@ -76,13 +76,15 @@ fn event(id: &str, kind: JobKind, step: impl Into<String>, fraction: f32) -> Job
 }
 
 /// Małe modele potrzebne do spotkań (VAD 2 MB, mówcy 27 MB) dociągamy same, bez pytania.
-async fn ensure_support_models(app: &AppHandle, id: &str, diarize: bool) -> Result<()> {
-    let mut needed = vec![AssetId::SileroVad];
+/// Pobiera brakujące modele potrzebne do przepisania: VAD, model mówców i sam silnik (np.
+/// Whisper ustawiony jako domyślny, ale jeszcze niepobrany).
+async fn ensure_support_models(app: &AppHandle, id: &str, diarize: bool, engine: EngineId) -> Result<()> {
+    let mut needed = vec![models::asset(AssetId::SileroVad)];
     if diarize {
-        needed.push(AssetId::SpeakerModel);
+        needed.push(models::asset(AssetId::SpeakerModel));
     }
-    for a in needed {
-        let asset = models::asset(a);
+    needed.push(engine.asset());
+    for asset in needed {
         if asset.is_installed() {
             continue;
         }
@@ -91,7 +93,7 @@ async fn ensure_support_models(app: &AppHandle, id: &str, diarize: bool) -> Resu
         asset
             .download(&AtomicBool::new(false), move |done, total| {
                 let f = if total > 0 { done as f32 / total as f32 } else { 0.0 };
-                emit(&app2, event(id, JobKind::Transcribe, format!("Pobieranie: {title}"), f * 0.05));
+                emit(&app2, event(id, JobKind::Transcribe, format!("Pobieranie: {title} ({:.0}%)", f * 100.0), f * 0.05));
             })
             .await?;
     }
@@ -111,9 +113,16 @@ pub async fn transcribe(app: AppHandle, id: String, engine: Option<EngineId>, la
             m.last_error = None;
         })?;
         emit(&app, event(&id, JobKind::Transcribe, "Przygotowanie", 0.0));
-        ensure_support_models(&app, &id, settings.meeting_diarization).await?;
+        let engine = engine.unwrap_or(settings.meeting_engine);
+        ensure_support_models(&app, &id, settings.meeting_diarization, engine).await?;
         let languages = languages.unwrap_or_else(|| settings.meeting_language.code().map(String::from).into_iter().collect());
-        let opts = Options { engine: engine.unwrap_or(settings.meeting_engine), languages: languages.clone(), diarize: settings.meeting_diarization, tuning: Default::default() };
+        let opts = Options {
+            engine,
+            languages: languages.clone(),
+            vocabulary: settings.vocabulary.clone(),
+            diarize: settings.meeting_diarization,
+            tuning: Default::default(),
+        };
         let (app2, id2, store2, cancel2) = (app.clone(), id.clone(), store.clone(), cancel.clone());
         let r = tauri::async_runtime::spawn_blocking(move || {
             transcriber::transcribe(&store2, &id2, &opts, &cancel2, |p| emit(&app2, event(&id2, JobKind::Transcribe, p.step, p.fraction)))

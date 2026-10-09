@@ -39,6 +39,13 @@ impl Engine {
         })
     }
 
+    /// Słownik nazw i terminów jako podpowiedź dla Whispera (Parakeet i Canary jej nie obsługują).
+    pub fn set_vocabulary(&mut self, vocabulary: &str) {
+        if let Engine::Whisper(w) = self {
+            w.set_vocabulary(vocabulary);
+        }
+    }
+
     /// Czy model przepisze w tych językach (kody whisper.cpp; puste = sam rozpozna język,
     /// kilka = rozmowa mieszana). Sprawdzane przed wczytaniem modelu.
     pub fn check_languages(id: EngineId, languages: &[String]) -> Result<()> {

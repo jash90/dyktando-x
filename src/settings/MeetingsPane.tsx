@@ -21,7 +21,7 @@ export default function MeetingsPane({ settings, update, env }: PaneProps) {
         <ShortcutRecorder value={settings.shortcut_meeting} onChange={(v) => update({ shortcut_meeting: v })} mac={mac} />
       </div>
       <div className="row">
-        <label>Model do spotkań</label>
+        <label>Model do przepisywania po nagraniu</label>
         <select value={settings.meeting_engine} onChange={(e) => update({ meeting_engine: e.target.value as EngineId })}>
           {(Object.keys(ENGINE_LABELS) as EngineId[]).map((id) => (
             <option key={id} value={id}>
@@ -31,8 +31,21 @@ export default function MeetingsPane({ settings, update, env }: PaneProps) {
         </select>
         <p className="hint">
           Godzina nagrania: Parakeet ok. 5 min, Whisper turbo ok. 12 min (Mac z Apple Silicon; na innych komputerach dłużej). Whisper turbo
-          robi w polskich rozmowach wyraźnie mniej błędów (ok. 8% słów zamiast 12%) i nie wtrąca angielskich słów — warto go wybrać, jeśli
-          czas nie gra roli.
+          robi w polskich rozmowach wyraźnie mniej błędów, lepiej zapisuje nazwy i angielskie terminy — dlatego jest domyślny. Brakujący
+          model pobierze się sam przy pierwszym przepisywaniu.
+        </p>
+      </div>
+      <div className="row">
+        <label>Słownik nazw (Whisper)</label>
+        <textarea
+          rows={3}
+          value={settings.vocabulary}
+          placeholder="np. NPaw, Hisense, Tizen, CI/CD, Apple TV, Klaudiusz, Borys"
+          onChange={(e) => update({ vocabulary: e.target.value })}
+        />
+        <p className="hint">
+          Nazwy, terminy i imiona, które padają w rozmowach i dyktowaniu — Whisper częściej zapisze je poprawnie. Wpisz je po przecinku, w
+          takiej pisowni, jakiej oczekujesz. Parakeet i Canary słownika nie obsługują.
         </p>
       </div>
       <div className="row">
@@ -54,12 +67,27 @@ export default function MeetingsPane({ settings, update, env }: PaneProps) {
             checked={settings.meeting_live_transcription}
             onChange={(e) => update({ meeting_live_transcription: e.target.checked })}
           />
-          Przepisuj na żywo w trakcie nagrania (tekst roboczy co ok. 1,5 s; najszybciej z Parakeetem)
+          Przepisuj na żywo w trakcie nagrania (tekst roboczy co ok. 1,5 s)
         </label>
         <label>
           <input type="checkbox" checked={settings.meeting_live_window} onChange={(e) => update({ meeting_live_window: e.target.checked })} />
           Pokazuj w trakcie nagrania małe okno na wierzchu z licznikiem, poziomami dźwięku i tekstem na żywo
         </label>
+      </div>
+      <div className="row">
+        <label>Model na żywo</label>
+        <select
+          value={settings.meeting_live_engine}
+          disabled={!settings.meeting_live_transcription}
+          onChange={(e) => update({ meeting_live_engine: e.target.value as EngineId })}
+        >
+          {(Object.keys(ENGINE_LABELS) as EngineId[]).map((id) => (
+            <option key={id} value={id}>
+              {ENGINE_LABELS[id]}
+            </option>
+          ))}
+        </select>
+        <p className="hint">Na żywo liczy się szybkość — najlepiej Parakeet. Po nagraniu całość przepisze jeszcze raz model wybrany wyżej.</p>
       </div>
       <div className="row">
         <label>Tłumacz na żywo na</label>

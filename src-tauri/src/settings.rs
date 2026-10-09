@@ -125,7 +125,10 @@ pub struct Settings {
     pub paste_mode: PasteMode,
     pub hud_enabled: bool,
 
+    /// Model do przepisywania po nagraniu (i importu).
     pub meeting_engine: EngineId,
+    /// Model transkrypcji na żywo — tu liczy się szybkość, po nagraniu jakość.
+    pub meeting_live_engine: EngineId,
     /// Język spotkań (transkrypcja po nagraniu, na żywo, import; źródło tłumaczenia na żywo).
     pub meeting_language: Language,
     /// Przepisuj wypowiedzi w trakcie nagrania (tekst pojawia się chwilę po każdej pauzie).
@@ -141,6 +144,10 @@ pub struct Settings {
     pub meeting_detection_prompt: bool,
     pub meeting_consent_reminder: bool,
     pub shortcut_meeting: String,
+
+    /// Słownik nazw i terminów (np. „NPaw, Hisense, Tizen, CI/CD”) — podpowiedź dla Whispera
+    /// przy dyktowaniu i spotkaniach.
+    pub vocabulary: String,
 
     pub ai_provider: ProviderId,
     pub ai_providers: BTreeMap<ProviderId, ProviderConfig>,
@@ -159,7 +166,10 @@ impl Default for Settings {
             modifier_push_to_talk: String::new(),
             paste_mode: PasteMode::Auto,
             hud_enabled: true,
-            meeting_engine: EngineId::ParakeetV3,
+            // Whisper turbo robi w rozmowach wyraźnie mniej błędów (porównanie na nagraniu daily:
+            // 12,8% vs 19,6% słów u Parakeeta); po nagraniu czas nie gra roli.
+            meeting_engine: EngineId::WhisperTurbo,
+            meeting_live_engine: EngineId::ParakeetV3,
             meeting_language: Language::Pl,
             meeting_live_transcription: true,
             meeting_live_translate_to: String::new(),
@@ -171,6 +181,7 @@ impl Default for Settings {
             meeting_detection_prompt: true,
             meeting_consent_reminder: true,
             shortcut_meeting: "Ctrl+Alt+R".into(),
+            vocabulary: String::new(),
             ai_provider: ProviderId::Anthropic,
             ai_providers: BTreeMap::new(),
             ai_prompt: String::new(),
@@ -183,14 +194,19 @@ impl Settings {
         std::fs::read(paths::settings_file()).ok().and_then(|b| Self::parse(&b)).unwrap_or_default()
     }
 
-    /// Plik sprzed osobnego języka spotkań: spotkania dostają dotychczasowy wspólny język,
-    /// żeby po aktualizacji działały tak samo jak wcześniej.
+    /// Stare pliki działają po aktualizacji tak samo jak wcześniej: sprzed osobnego języka
+    /// spotkań — spotkania dostają dotychczasowy wspólny język; sprzed osobnego modelu na żywo —
+    /// na żywo zostaje model spotkań.
     fn parse(bytes: &[u8]) -> Option<Self> {
         let value: serde_json::Value = serde_json::from_slice(bytes).ok()?;
         let has_meeting_language = value.get("meeting_language").is_some();
+        let has_live_engine = value.get("meeting_live_engine").is_some();
         let mut s: Self = serde_json::from_value(value).ok()?;
         if !has_meeting_language {
             s.meeting_language = s.language;
+        }
+        if !has_live_engine {
+            s.meeting_live_engine = s.meeting_engine;
         }
         Some(s)
     }
@@ -232,6 +248,17 @@ mod tests {
         assert_eq!((s.language, s.meeting_language), (Language::Auto, Language::Auto));
         let s = Settings::parse(br#"{"language":"en","meeting_language":"pl"}"#).unwrap();
         assert_eq!((s.language, s.meeting_language), (Language::En, Language::Pl));
+    }
+
+    #[test]
+    fn old_file_keeps_its_meeting_model_for_live_transcription() {
+        let s = Settings::parse(br#"{"meeting_engine":"canary_v2"}"#).unwrap();
+        assert_eq!((s.meeting_engine, s.meeting_live_engine), (EngineId::CanaryV2, EngineId::CanaryV2));
+        let s = Settings::parse(br#"{"meeting_engine":"whisper_turbo","meeting_live_engine":"parakeet_v3"}"#).unwrap();
+        assert_eq!((s.meeting_engine, s.meeting_live_engine), (EngineId::WhisperTurbo, EngineId::ParakeetV3));
+        // Nowa instalacja: Whisper po nagraniu, Parakeet na żywo.
+        let d = Settings::default();
+        assert_eq!((d.meeting_engine, d.meeting_live_engine), (EngineId::WhisperTurbo, EngineId::ParakeetV3));
     }
 
     #[test]

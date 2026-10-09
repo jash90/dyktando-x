@@ -20,7 +20,12 @@ export interface Settings {
   modifier_push_to_talk: string;
   paste_mode: PasteMode;
   hud_enabled: boolean;
+  /** Model do przepisywania po nagraniu i importu. */
   meeting_engine: EngineId;
+  /** Model transkrypcji na żywo. */
+  meeting_live_engine: EngineId;
+  /** Słownik nazw i terminów — podpowiedź dla Whispera (dyktowanie i spotkania). */
+  vocabulary: string;
   /** Język spotkań (niezależny od dyktowania). */
   meeting_language: Language;
   meeting_live_transcription: boolean;
