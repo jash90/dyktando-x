@@ -20,6 +20,8 @@ export interface Settings {
   modifier_push_to_talk: string;
   paste_mode: PasteMode;
   hud_enabled: boolean;
+  /** Zapisuj każde dyktowanie (tekst i nagranie) w historii. */
+  dictation_history: boolean;
   /** Model do przepisywania po nagraniu i importu. */
   meeting_engine: EngineId;
   /** Model transkrypcji na żywo. */
@@ -248,6 +250,31 @@ export interface ProviderInfo {
   default_model: string;
   model_placeholder: string;
 }
+
+/** Dyktowanie zapisane w historii. */
+export interface DictationEntry {
+  id: string;
+  createdAt: string;
+  durationSeconds: number;
+  /** Tekst po poprawkach — to, co trafiło do pola. */
+  text: string;
+  /** Wynik modelu przed poprawkami. */
+  raw: string;
+  engine: string;
+  languages: string[];
+  /** Wklejone do aktywnego pola (inaczej tylko do schowka). */
+  pasted: boolean;
+  audioDeleted: boolean;
+}
+
+export const dictationsApi = {
+  list: () => invoke<DictationEntry[]>("list_dictations"),
+  remove: (id: string) => invoke<void>("delete_dictation", { id }),
+  /** Okno zapisu nagrania; ścieżka pliku albo `null` = anulowano. */
+  exportAudio: (id: string) => invoke<string | null>("export_dictation_audio", { id }),
+  retranscribe: (id: string, engine: EngineId, languages: string[]) =>
+    invoke<DictationEntry>("retranscribe_dictation", { id, engine, languages }),
+};
 
 export const meetingsApi = {
   status: () => invoke<RecordingStatus>("meeting_status"),

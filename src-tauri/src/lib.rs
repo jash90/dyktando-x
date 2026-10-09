@@ -3,6 +3,7 @@ mod ai;
 mod audio;
 mod commands;
 mod dictation;
+mod dictations;
 mod engine;
 mod focus;
 mod hotkeys;
@@ -304,6 +305,10 @@ fn start_background(app: &AppHandle) {
                 if n > 0 {
                     log::info!("Retencja: usunięto audio {n} spotkań starszych niż {days} dni");
                 }
+                let n = dictations::History::default().apply_retention(days, chrono::Local::now());
+                if n > 0 {
+                    log::info!("Retencja: usunięto nagrania {n} dyktowań starszych niż {days} dni");
+                }
                 last_retention = std::time::Instant::now();
             }
             std::thread::sleep(std::time::Duration::from_millis(250));
@@ -432,6 +437,10 @@ pub fn run() {
             commands::transcribe_meeting,
             languages::list_languages,
             logging::reveal_logs,
+            dictations::list_dictations,
+            dictations::delete_dictation,
+            dictations::export_dictation_audio,
+            dictations::retranscribe_dictation,
             commands::summarize_meeting,
             commands::cancel_job,
             commands::job_status,

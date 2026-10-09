@@ -124,6 +124,8 @@ pub struct Settings {
     pub modifier_push_to_talk: String,
     pub paste_mode: PasteMode,
     pub hud_enabled: bool,
+    /// Zapisuj każde dyktowanie (tekst i nagranie) w historii — lokalnie, jak spotkania.
+    pub dictation_history: bool,
 
     /// Model do przepisywania po nagraniu (i importu).
     pub meeting_engine: EngineId,
@@ -166,6 +168,7 @@ impl Default for Settings {
             modifier_push_to_talk: String::new(),
             paste_mode: PasteMode::Auto,
             hud_enabled: true,
+            dictation_history: true,
             // Whisper turbo robi w rozmowach wyraźnie mniej błędów (porównanie na nagraniu daily:
             // 12,8% vs 19,6% słów u Parakeeta); po nagraniu czas nie gra roli.
             meeting_engine: EngineId::WhisperTurbo,
