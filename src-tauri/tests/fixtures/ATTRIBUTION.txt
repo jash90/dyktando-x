@@ -1,3 +1,4 @@
 fleurs_kobieta.wav, fleurs_mezczyzna.wav — Google FLEURS (pl_pl), licencja CC BY 4.0,
 https://huggingface.co/datasets/google/fleurs
 ja_zosia.wav — synteza mowy macOS (głos Zosia), wygenerowane lokalnie do testów.
+en_samantha.wav — synteza mowy macOS (głos Samantha), wygenerowane lokalnie do testów.

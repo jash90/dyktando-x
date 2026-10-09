@@ -7,6 +7,7 @@ mod engine;
 mod focus;
 mod hotkeys;
 mod hud;
+mod languages;
 mod live_window;
 mod meetings;
 mod models;
@@ -15,6 +16,7 @@ mod paths;
 mod postprocess;
 mod settings;
 mod tray;
+mod whisper;
 
 use serde::Serialize;
 use std::collections::HashMap;
@@ -427,6 +429,7 @@ pub fn run() {
             commands::export_meeting_audio,
             commands::import_meeting,
             commands::transcribe_meeting,
+            languages::list_languages,
             commands::summarize_meeting,
             commands::cancel_job,
             commands::job_status,

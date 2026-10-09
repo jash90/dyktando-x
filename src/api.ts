@@ -75,6 +75,7 @@ export type HudState =
 
 export const api = {
   getSettings: () => invoke<Settings>("get_settings"),
+  languages: () => invoke<LanguageInfo[]>("list_languages"),
   saveSettings: (settings: Settings) => invoke<string[]>("save_settings", { settings }),
   listInputDevices: () => invoke<{ devices: string[]; default: string | null }>("list_input_devices"),
   listModels: () => invoke<ModelInfo[]>("list_models"),
@@ -141,7 +142,16 @@ export interface Meeting {
   title: string | null;
   audioDeleted: boolean;
   transcriptEngine: string | null;
+  /** Języki ostatniej transkrypcji (puste = rozpoznane przez model); `null` = sprzed tej opcji. */
+  transcriptLanguages: string[] | null;
   lastError: string | null;
+}
+
+export interface LanguageInfo {
+  code: string;
+  name: string;
+  /** Obsługiwany też przez Parakeeta i Canary (inaczej tylko Whisper). */
+  european: boolean;
 }
 
 export interface MeetingDetail {
@@ -238,7 +248,9 @@ export const meetingsApi = {
   exportAudio: (id: string, track: AudioExport) => invoke<string | null>("export_meeting_audio", { id, track }),
   /** Okno wyboru pliku z nagraniem; `null` = anulowano. Wczytanie i transkrypcja idą w tle. */
   importFile: () => invoke<Meeting | null>("import_meeting"),
-  transcribe: (id: string, engine?: EngineId) => invoke<void>("transcribe_meeting", { id, engine: engine ?? null }),
+  /** `languages`: kody języków (puste = model rozpozna sam, kilka = rozmowa mieszana); brak = z ustawień. */
+  transcribe: (id: string, engine?: EngineId, languages?: string[]) =>
+    invoke<void>("transcribe_meeting", { id, engine: engine ?? null, languages: languages ?? null }),
   summarize: (id: string, provider: ProviderId, model?: string) =>
     invoke<void>("summarize_meeting", { id, provider, model: model ?? null }),
   cancelJob: () => invoke<void>("cancel_job"),

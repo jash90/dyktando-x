@@ -1390,6 +1390,7 @@ dependencies = [
  "transcribe-rs",
  "uiautomation",
  "wasapi",
+ "whisper-rs",
  "winreg 0.56.0",
 ]
 

@@ -98,7 +98,8 @@ async fn ensure_support_models(app: &AppHandle, id: &str, diarize: bool) -> Resu
     Ok(())
 }
 
-pub async fn transcribe(app: AppHandle, id: String, engine: Option<EngineId>) -> Result<()> {
+/// `languages: None` = język spotkań z ustawień (zob. `transcriber::Options::languages`).
+pub async fn transcribe(app: AppHandle, id: String, engine: Option<EngineId>, languages: Option<Vec<String>>) -> Result<()> {
     let state = app.state::<AppState>();
     let settings = state.settings.lock().unwrap().clone();
     let cancel = state.jobs.begin(&id, JobKind::Transcribe)?;
@@ -111,7 +112,8 @@ pub async fn transcribe(app: AppHandle, id: String, engine: Option<EngineId>) ->
         })?;
         emit(&app, event(&id, JobKind::Transcribe, "Przygotowanie", 0.0));
         ensure_support_models(&app, &id, settings.meeting_diarization).await?;
-        let opts = Options { engine: engine.unwrap_or(settings.meeting_engine), language: settings.meeting_language, diarize: settings.meeting_diarization, tuning: Default::default() };
+        let languages = languages.unwrap_or_else(|| settings.meeting_language.code().map(String::from).into_iter().collect());
+        let opts = Options { engine: engine.unwrap_or(settings.meeting_engine), languages: languages.clone(), diarize: settings.meeting_diarization, tuning: Default::default() };
         let (app2, id2, store2, cancel2) = (app.clone(), id.clone(), store.clone(), cancel.clone());
         let r = tauri::async_runtime::spawn_blocking(move || {
             transcriber::transcribe(&store2, &id2, &opts, &cancel2, |p| emit(&app2, event(&id2, JobKind::Transcribe, p.step, p.fraction)))
@@ -123,6 +125,7 @@ pub async fn transcribe(app: AppHandle, id: String, engine: Option<EngineId>) ->
                 store.update(&id, |m| {
                     m.state = State::Transcribed;
                     m.transcript_engine = Some(doc.engine.clone());
+                    m.transcript_languages = Some(languages);
                 })?;
                 Ok(())
             }
@@ -238,7 +241,7 @@ pub fn import_file(app: AppHandle, path: std::path::PathBuf) -> Result<Meeting> 
             return;
         }
         let settings = app.state::<AppState>().settings.lock().unwrap().clone();
-        if transcribe(app.clone(), id.clone(), None).await.is_ok() && settings.meeting_auto_summarize && keys::has(settings.ai_provider) {
+        if transcribe(app.clone(), id.clone(), None, None).await.is_ok() && settings.meeting_auto_summarize && keys::has(settings.ai_provider) {
             let _ = summarize(app, id, settings.ai_provider, None).await;
         }
     });
@@ -253,7 +256,7 @@ pub fn after_recording(app: AppHandle, id: String) {
         if !settings.meeting_auto_transcribe {
             return;
         }
-        if transcribe(app.clone(), id.clone(), None).await.is_err() {
+        if transcribe(app.clone(), id.clone(), None, None).await.is_err() {
             return;
         }
         if settings.meeting_auto_summarize && keys::has(settings.ai_provider) {

@@ -30,6 +30,10 @@ Tauri 2 + Rust + React/TypeScript.
   app starts using the microphone.
   Each track can be downloaded as a separate WAV file ("Mój głos" for your microphone,
   "Rozmówcy" for the other participants), or both mixed into one ("Całe nagranie").
+  If a transcript came out poorly, re-transcribe the meeting with its language(s) set: one
+  language, or several for a mixed conversation, in which case Whisper picks, for every
+  utterance, the most likely of the chosen languages. Whisper knows ~100 languages, Parakeet and
+  Canary the 25 European ones (Parakeet always detects the language itself, Canary needs exactly one).
 - **Imported recordings:** "Importuj nagranie" turns an audio file of a conversation (MP3, M4A/AAC,
   WAV, FLAC, OGG Vorbis/Opus, AIFF, CAF) into a meeting: the file is decoded locally, transcribed
   with speaker labels ("Rozmówca 1", "Rozmówca 2"…) and, if enabled, summarized.
