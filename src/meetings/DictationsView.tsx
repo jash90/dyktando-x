@@ -22,7 +22,8 @@ export default function DictationsView({ query, onError }: { query: string; onEr
   const [engine, setEngine] = useState<EngineId | null>(null);
   const [languages, setLanguages] = useState<string[]>([]);
   const [allLanguages, setAllLanguages] = useState<LanguageInfo[]>([]);
-  const [busy, setBusy] = useState<string | null>(null);
+  /** Wpis, który właśnie jest przepisywany od nowa. */
+  const [retranscribing, setRetranscribing] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
 
   const refresh = useCallback(() => dictationsApi.list().then(setEntries), []);
@@ -57,16 +58,19 @@ export default function DictationsView({ query, onError }: { query: string; onEr
 
   const status = languageCheck(engine, languages, allLanguages);
 
-  const act = async (id: string, f: () => Promise<unknown>) => {
+  const act = async (f: () => Promise<unknown>) => {
     onError(null);
-    setBusy(id);
     try {
       await f();
     } catch (e) {
       onError(String(e));
-    } finally {
-      setBusy(null);
     }
+  };
+
+  const retranscribe = async (id: string, engine: EngineId) => {
+    setRetranscribing(id);
+    await act(() => dictationsApi.retranscribe(id, engine, languages));
+    setRetranscribing(null);
   };
 
   const copy = (e: DictationEntry) => {
@@ -117,17 +121,17 @@ export default function DictationsView({ query, onError }: { query: string; onEr
                 {e.pasted ? "" : " · tylko do schowka"}
                 {e.audioDeleted ? " · nagranie usunięte" : ""}
               </div>
-              <p className="dict-text">{busy === e.id ? "Przepisywanie…" : e.text}</p>
+              <p className="dict-text">{retranscribing === e.id ? "Przepisywanie…" : e.text}</p>
               <div className="dict-actions">
                 <button className="icon" title="Kopiuj tekst" aria-label="Kopiuj tekst" onClick={() => copy(e)}>
                   <Copy size={15} /> {copied === e.id && <span className="hint">skopiowano</span>}
                 </button>
                 <button
                   className="icon"
-                  disabled={e.audioDeleted || !!busy || !engine || !!status.error}
+                  disabled={e.audioDeleted || !!retranscribing || !engine || !!status.error}
                   title={e.audioDeleted ? "Nagranie zostało usunięte" : (status.error ?? "Przepisz ponownie wybranym modelem i językiem")}
                   aria-label="Przepisz ponownie"
-                  onClick={() => engine && act(e.id, () => dictationsApi.retranscribe(e.id, engine, languages))}
+                  onClick={() => engine && retranscribe(e.id, engine)}
                 >
                   <Wand2 size={15} />
                 </button>
@@ -136,7 +140,7 @@ export default function DictationsView({ query, onError }: { query: string; onEr
                   disabled={e.audioDeleted}
                   title="Pobierz nagranie (WAV)"
                   aria-label="Pobierz nagranie"
-                  onClick={() => act(e.id, () => dictationsApi.exportAudio(e.id))}
+                  onClick={() => act(() => dictationsApi.exportAudio(e.id))}
                 >
                   <Download size={15} />
                 </button>
@@ -144,7 +148,7 @@ export default function DictationsView({ query, onError }: { query: string; onEr
                   className="icon danger"
                   title="Usuń dyktowanie"
                   aria-label="Usuń dyktowanie"
-                  onClick={() => confirm("Usunąć to dyktowanie razem z nagraniem?") && act(e.id, () => dictationsApi.remove(e.id))}
+                  onClick={() => confirm("Usunąć to dyktowanie razem z nagraniem?") && act(() => dictationsApi.remove(e.id))}
                 >
                   <Trash2 size={15} />
                 </button>

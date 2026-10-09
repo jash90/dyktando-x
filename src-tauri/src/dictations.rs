@@ -198,6 +198,9 @@ fn retranscribe(h: &History, id: &str, engine: EngineId, languages: Vec<String>,
     let codes: Vec<&str> = languages.iter().map(String::as_str).collect();
     let raw = e.transcribe_in(&audio, &codes)?;
     let text = crate::postprocess::apply(&raw);
+    if text.is_empty() {
+        return Err(anyhow!("Model nic nie rozpoznał — poprzedni tekst zostaje"));
+    }
     h.update(id, |x| {
         x.raw = raw;
         x.text = text;
@@ -264,6 +267,17 @@ mod tests {
         println!("{} → {}", got.engine, got.text);
         assert!(got.text.to_lowercase().contains("wizy"), "{}", got.text);
         assert_eq!(h.load(&e.id).unwrap().text, got.text);
+        std::fs::remove_dir_all(&h.root).ok();
+    }
+
+    #[test]
+    #[ignore]
+    fn empty_retranscription_keeps_the_previous_text() {
+        let h = history();
+        let e = entry(Local::now(), "Dobry tekst.");
+        h.save(&e, &[0.0; 16_000]).unwrap(); // sama cisza — model nic nie rozpozna
+        assert!(retranscribe(&h, &e.id, EngineId::ParakeetV3, vec!["pl".into()], "").is_err());
+        assert_eq!(h.load(&e.id).unwrap().text, "Dobry tekst.");
         std::fs::remove_dir_all(&h.root).ok();
     }
 
