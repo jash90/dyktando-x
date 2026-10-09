@@ -8,8 +8,9 @@ use crate::dictation::{emit as hud_emit, HudState};
 use crate::meetings::live;
 use crate::meetings::processing::{self, JobEvent};
 use crate::meetings::recorder::RecordingStatus;
-use crate::meetings::transcript::Utterance;
-use crate::meetings::store::{read_to_string, Meeting, Store};
+use crate::meetings::store::{read_to_string, Meeting, Store, MIC, SYSTEM};
+use crate::meetings::transcript::{Track, Utterance};
+use crate::meetings::writer;
 use crate::models::EngineId;
 use crate::settings::ProviderId;
 use crate::AppState;
@@ -124,6 +125,25 @@ pub struct MeetingDetail {
     transcript: Option<String>,
     summaries: Vec<SummaryFile>,
     folder: String,
+    /// Ścieżki z nagraniem, które można pobrać jako WAV.
+    tracks: Vec<Track>,
+}
+
+fn track_prefix(track: Track) -> &'static str {
+    match track {
+        Track::Mic => MIC,
+        Track::System => SYSTEM,
+    }
+}
+
+/// Ścieżki, które mają jakiekolwiek próbki (import ma tylko `system`, spotkanie bez dźwięku
+/// aplikacji tylko `mic`; po usunięciu nagrania nie ma żadnej).
+fn exportable_tracks(s: &Store, m: &Meeting) -> Vec<Track> {
+    if m.audio_deleted {
+        return Vec::new();
+    }
+    let dir = s.audio_folder(&m.id);
+    [Track::Mic, Track::System].into_iter().filter(|t| writer::track_duration_samples(&dir, track_prefix(*t)) > 0).collect()
 }
 
 #[tauri::command]
@@ -135,7 +155,8 @@ pub fn get_meeting(id: String) -> Result<MeetingDetail, String> {
         .into_iter()
         .filter_map(|p| Some(SummaryFile { name: p.file_name()?.to_string_lossy().into(), content: read_to_string(&p)? }))
         .collect();
-    Ok(MeetingDetail { transcript: read_to_string(&s.transcript_md(&id)), summaries, folder: s.folder(&id).display().to_string(), meeting })
+    let tracks = exportable_tracks(&s, &meeting);
+    Ok(MeetingDetail { transcript: read_to_string(&s.transcript_md(&id)), summaries, folder: s.folder(&id).display().to_string(), tracks, meeting })
 }
 
 #[tauri::command]
@@ -166,6 +187,40 @@ pub fn reveal_meeting(app: AppHandle, id: String) -> Result<(), String> {
     let s = store();
     let target = if s.transcript_md(&id).exists() { s.transcript_md(&id) } else { s.folder(&id) };
     app.opener().reveal_item_in_dir(target).map_err(|e| e.to_string())
+}
+
+/// Zapisuje jedną ścieżkę spotkania (mikrofon albo rozmówcy) jako jeden plik WAV we wskazanym
+/// miejscu. Zwraca ścieżkę pliku; `None` = użytkownik zamknął okno bez wyboru.
+#[tauri::command]
+pub async fn export_meeting_audio(app: AppHandle, id: String, track: Track) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let s = store();
+    let meeting = s.load(&id).ok_or("Brak spotkania")?;
+    if meeting.audio_in_progress() {
+        return Err("Poczekaj, aż nagranie się zakończy".into());
+    }
+    if !exportable_tracks(&s, &meeting).contains(&track) {
+        return Err("Brak nagrania tej ścieżki".into());
+    }
+    let (title, suffix) = match track {
+        Track::Mic => ("Zapisz moją ścieżkę", "ja"),
+        Track::System => ("Zapisz ścieżkę rozmówców", "rozmowcy"),
+    };
+    let picked = app
+        .dialog()
+        .file()
+        .set_title(title)
+        .set_file_name(format!("{id}-{suffix}.wav"))
+        .add_filter("WAV", &["wav"])
+        .blocking_save_file();
+    let Some(file) = picked else { return Ok(None) };
+    let target = file.into_path().map_err(|e| e.to_string())?;
+    let dir = s.audio_folder(&id);
+    tauri::async_runtime::spawn_blocking(move || writer::export_wav(&dir, track_prefix(track), &target).map(|_| target))
+        .await
+        .map_err(|e| e.to_string())?
+        .map(|p| Some(p.display().to_string()))
+        .map_err(|e| e.to_string())
 }
 
 /// Okno wyboru pliku z nagraniem rozmowy → nowe spotkanie (wczytanie i transkrypcja w tle).

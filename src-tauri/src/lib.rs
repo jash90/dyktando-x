@@ -424,6 +424,7 @@ pub fn run() {
             commands::rename_meeting,
             commands::delete_meeting,
             commands::reveal_meeting,
+            commands::export_meeting_audio,
             commands::import_meeting,
             commands::transcribe_meeting,
             commands::summarize_meeting,
