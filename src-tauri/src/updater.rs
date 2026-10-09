@@ -69,17 +69,21 @@ pub fn known_update(updates: tauri::State<Updates>) -> Option<UpdateInfo> {
     updates.available.lock().unwrap().as_ref().map(info)
 }
 
+/// Instalacja zamyka albo restartuje aplikację — nie wolno jej robić w trakcie spotkania.
+fn busy(app: &AppHandle) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    if state.recorder.status().recording {
+        return Err("Trwa nagrywanie spotkania — zatrzymaj je przed aktualizacją.".into());
+    }
+    if state.jobs.current().is_some() {
+        return Err("Trwa przetwarzanie spotkania — poczekaj na koniec albo je przerwij.".into());
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn install_update(app: AppHandle) -> Result<(), String> {
-    {
-        let state = app.state::<AppState>();
-        if state.recorder.status().recording {
-            return Err("Trwa nagrywanie spotkania — zatrzymaj je przed aktualizacją.".into());
-        }
-        if state.jobs.current().is_some() {
-            return Err("Trwa przetwarzanie spotkania — poczekaj na koniec albo je przerwij.".into());
-        }
-    }
+    busy(&app)?;
     let updates = app.state::<Updates>();
     let Some(update) = updates.available.lock().unwrap().clone() else {
         return Err("Brak aktualizacji do zainstalowania — sprawdź ponownie.".into());
@@ -90,8 +94,8 @@ pub async fn install_update(app: AppHandle) -> Result<(), String> {
     log::info!("Aktualizacja {} → {}", update.current_version, update.version);
     let mut done = 0u64;
     let mut last_emit = std::time::Instant::now();
-    let result = update
-        .download_and_install(
+    let downloaded = update
+        .download(
             |chunk, total| {
                 done += chunk as u64;
                 if last_emit.elapsed().as_millis() > 150 {
@@ -101,9 +105,15 @@ pub async fn install_update(app: AppHandle) -> Result<(), String> {
             },
             || {},
         )
-        .await;
+        .await
+        .map_err(|e| e.to_string());
+    // Spotkanie mogło się zacząć w trakcie pobierania — sprawdzamy jeszcze raz tuż przed instalacją.
+    let result = downloaded.and_then(|bytes| {
+        busy(&app)?;
+        update.install(bytes).map_err(|e| e.to_string())
+    });
     updates.installing.store(false, Ordering::SeqCst);
-    let error = result.err().map(|e| e.to_string());
+    let error = result.err();
     let _ = app.emit("update-progress", UpdateProgress { done, total: done, finished: true, error: error.clone() });
     if let Some(e) = error {
         log::error!("Aktualizacja nieudana: {e}");
