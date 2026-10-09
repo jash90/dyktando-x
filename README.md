@@ -29,7 +29,7 @@ Tauri 2 + Rust + React/TypeScript.
   "Rozmówca 1", "Rozmówca 2"…). A "Meeting detected — record?" prompt appears when a conferencing
   app starts using the microphone.
   Each track can be downloaded as a separate WAV file ("Mój głos" for your microphone,
-  "Rozmówcy" for the other participants).
+  "Rozmówcy" for the other participants), or both mixed into one ("Całe nagranie").
 - **Imported recordings:** "Importuj nagranie" turns an audio file of a conversation (MP3, M4A/AAC,
   WAV, FLAC, OGG Vorbis/Opus, AIFF, CAF) into a meeting: the file is decoded locally, transcribed
   with speaker labels ("Rozmówca 1", "Rozmówca 2"…) and, if enabled, summarized.
