@@ -191,18 +191,28 @@ pub fn track_duration_samples(dir: &Path, prefix: &str) -> u64 {
         .sum()
 }
 
-/// Cała ścieżka jako jeden plik WAV (eksport).
-#[allow(dead_code)]
+/// Cała ścieżka jako jeden plik WAV (eksport). Zapis idzie do pliku tymczasowego obok celu,
+/// więc przerwany eksport nie zostawia uciętego pliku ani nie psuje istniejącego.
 pub fn export_wav(dir: &Path, prefix: &str, target: &Path) -> Result<u64> {
-    let mut w = hound::WavWriter::create(target, spec())?;
-    let n = read_track(dir, prefix, 60, |_, chunk| {
-        for s in chunk {
-            w.write_sample((s * 32768.0).round().clamp(-32768.0, 32767.0) as i16)?;
-        }
-        Ok(())
-    })?;
-    w.finalize()?;
-    Ok(n)
+    let mut part = target.as_os_str().to_owned();
+    part.push(".part");
+    let part = PathBuf::from(part);
+    let result = (|| {
+        let mut w = hound::WavWriter::create(&part, spec())?;
+        let n = read_track(dir, prefix, 60, |_, chunk| {
+            for s in chunk {
+                w.write_sample((s * 32768.0).round().clamp(-32768.0, 32767.0) as i16)?;
+            }
+            Ok(())
+        })?;
+        w.finalize()?;
+        std::fs::rename(&part, target).with_context(|| format!("Nie udało się zapisać {}", target.display()))?;
+        Ok(n)
+    })();
+    if result.is_err() {
+        std::fs::remove_file(&part).ok();
+    }
+    result
 }
 
 #[cfg(test)]
@@ -279,6 +289,16 @@ mod tests {
     }
 
     #[test]
+    fn export_of_missing_track_leaves_no_file() {
+        let dir = tmp();
+        std::fs::create_dir_all(&dir).unwrap();
+        let out = dir.join("none.wav");
+        export_wav(&dir.join("brak"), "mic", &out).ok();
+        assert!(!dir.join("none.wav.part").exists());
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
     fn silence_and_export() {
         let dir = tmp();
         let mut w = SegmentedWriter::new(&dir, "mic").unwrap();
@@ -288,6 +308,7 @@ mod tests {
         let out = dir.join("all.wav");
         assert_eq!(export_wav(&dir, "mic", &out).unwrap(), 40_100);
         assert_eq!(hound::WavReader::open(&out).unwrap().duration(), 40_100);
+        assert!(!dir.join("all.wav.part").exists());
         std::fs::remove_dir_all(dir).ok();
     }
 }

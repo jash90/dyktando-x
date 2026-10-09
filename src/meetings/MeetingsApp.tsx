@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { AlertTriangle, Circle, FileAudio, FileText, FolderOpen, Mic, Pencil, Sparkles, Square, Trash2, Wand2, X } from "lucide-react";
+import { AlertTriangle, Circle, Download, FileAudio, FileText, FolderOpen, Mic, Pencil, Sparkles, Square, Trash2, Wand2, X } from "lucide-react";
 import {
   aiApi,
   api,
@@ -11,6 +11,7 @@ import {
   nextDrafts,
   shortDate,
   STATE_LABELS,
+  type AudioTrack,
   type EngineId,
   type JobEvent,
   type LiveDrafts,
@@ -167,6 +168,12 @@ export default function MeetingsApp() {
   );
 }
 
+/** Pobieranie nagrania osobno dla każdej ścieżki: mikrofon to Ty, dźwięk aplikacji to rozmówcy. */
+const EXPORTS: { track: AudioTrack; label: string; title: string }[] = [
+  { track: "mic", label: "Mój głos", title: "Pobierz nagranie z mikrofonu (to, co mówisz) jako WAV" },
+  { track: "system", label: "Rozmówcy", title: "Pobierz nagranie rozmówców (dźwięk aplikacji) jako WAV" },
+];
+
 function Detail({
   detail,
   job,
@@ -190,6 +197,7 @@ function Detail({
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(m.title ?? "");
   const [summaryIndex, setSummaryIndex] = useState(0);
+  const [exporting, setExporting] = useState<AudioTrack | null>(null);
 
   useEffect(() => {
     api.getSettings().then((s: Settings) => {
@@ -209,6 +217,7 @@ function Detail({
   const recording = m.state === "recording";
   const canTranscribe = !m.audioDeleted && !recording && !busy;
   const canSummarize = !!detail.transcript && !recording && !busy;
+  const canExport = !recording && m.state !== "importing" && !exporting;
   const summary = detail.summaries[summaryIndex];
   const providerInfo = useMemo(() => providers.find((p) => p.id === provider), [providers, provider]);
 
@@ -220,6 +229,18 @@ function Detail({
       if (String(e) !== "Przerwano") onError(String(e));
     }
     onChanged();
+  };
+
+  const exportAudio = async (track: AudioTrack) => {
+    onError(null);
+    setExporting(track);
+    try {
+      await meetingsApi.exportAudio(m.id, track);
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      setExporting(null);
+    }
   };
 
   const copy = () => {
@@ -292,6 +313,11 @@ function Detail({
           </button>
         </div>
         <div className="group right">
+          {EXPORTS.filter((x) => detail.tracks.includes(x.track)).map((x) => (
+            <button key={x.track} disabled={!canExport} title={x.title} onClick={() => exportAudio(x.track)}>
+              <Download size={14} /> {exporting === x.track ? "Zapisywanie…" : x.label}
+            </button>
+          ))}
           <button className="icon" onClick={() => meetingsApi.reveal(m.id)} title="Pokaż pliki" aria-label="Pokaż pliki">
             <FolderOpen size={16} />
           </button>

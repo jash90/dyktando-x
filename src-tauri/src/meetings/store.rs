@@ -53,6 +53,11 @@ impl Meeting {
     pub fn can_transcribe(&self) -> bool {
         !self.audio_deleted && !matches!(self.state, State::Recording | State::Importing | State::Transcribing | State::Summarizing)
     }
+
+    /// Czy pliki audio są właśnie zapisywane (nagrywanie albo wczytywanie importu).
+    pub fn audio_in_progress(&self) -> bool {
+        matches!(self.state, State::Recording | State::Importing)
+    }
 }
 
 #[derive(Clone)]
