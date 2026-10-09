@@ -34,6 +34,14 @@ Tauri 2 + Rust + React/TypeScript.
   language, or several for a mixed conversation, in which case Whisper picks, for every
   utterance, the most likely of the chosen languages. Whisper knows ~100 languages, Parakeet and
   Canary the 25 European ones (Parakeet always detects the language itself, Canary needs exactly one).
+- **Recording safety:** if the microphone or the application audio stops delivering sound during a
+  meeting (device switched, Bluetooth headset, stream error), the source is recreated within a few
+  seconds; unavoidable gaps are listed in the meeting. Logs are written to
+  `~/Library/Logs/Dyktando X` (macOS) or `<data directory>/logs`.
+- **Dictation history:** every dictation (text and recording) is kept locally in the "Dyktowania"
+  tab of the meetings window, where it can be copied, downloaded or re-transcribed with another
+  model or language.
+- **Vocabulary:** names and terms that Whisper should spell correctly (settings → Spotkania).
 - **Imported recordings:** "Importuj nagranie" turns an audio file of a conversation (MP3, M4A/AAC,
   WAV, FLAC, OGG Vorbis/Opus, AIFF, CAF) into a meeting: the file is decoded locally, transcribed
   with speaker labels ("Rozmówca 1", "Rozmówca 2"…) and, if enabled, summarized.
