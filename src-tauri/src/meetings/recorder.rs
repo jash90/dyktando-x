@@ -142,7 +142,9 @@ impl Track {
         let after = w.samples_written() + out.len() as u64;
         if expected > after + GAP_TOLERANCE && w.samples_written() > 0 && self.report_gaps {
             let (start, len) = (w.samples_written() as f64 / RATE as f64, (expected - after) as f64 / RATE as f64);
-            log::warn!("Przerwa w dostawie dźwięku ({}): {len:.1} s od {start:.1} s", self.name);
+            if len >= 1.0 {
+                log::warn!("Przerwa w dostawie dźwięku ({}): {len:.1} s od {start:.1} s", self.name);
+            }
             self.gaps.push((start, len));
         }
         let result = if expected > after + GAP_TOLERANCE { w.append_silence(expected - after) } else { Ok(()) }.and_then(|_| w.append(&out));
@@ -817,10 +819,15 @@ mod tests {
         {
             let guard = rec.active.lock().unwrap();
             let src = &guard.as_ref().unwrap().sources;
-            src.stop_system();
-            *src.system.lock().unwrap() = Some(SystemCapture::start(Box::new(|_: &[f32]| {})).unwrap());
-            src.stop_mic();
-            *src.mic.lock().unwrap() = Some(InputCapture::start(None, Box::new(|_: &[f32]| {})).unwrap());
+            // Podmiana pod jedną blokadą — nadzór nie może zobaczyć chwili bez źródła.
+            let fake = SystemCapture::start(Box::new(|_: &[f32]| {})).unwrap();
+            if let Some(old) = src.system.lock().unwrap().replace(fake) {
+                old.stop();
+            }
+            let fake = InputCapture::start(None, Box::new(|_: &[f32]| {})).unwrap();
+            if let Some(old) = src.mic.lock().unwrap().replace(fake) {
+                old.stop();
+            }
         }
         std::thread::sleep(Duration::from_millis(1500));
         println!("ostrzeżenie w trakcie: {:?}", rec.status().warning);
