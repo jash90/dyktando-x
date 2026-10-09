@@ -1,20 +1,22 @@
-//! Silniki rozpoznawania mowy: Parakeet v3 (ONNX) i Whisper (whisper.cpp) przez transcribe-rs.
+//! Silniki rozpoznawania mowy: Parakeet v3 i Canary v2 (ONNX) przez transcribe-rs, Whisper
+//! (whisper.cpp) przez `crate::whisper`.
 //! Wejście zawsze 16 kHz mono f32. Instancja nie jest współdzielona między wątkami naraz.
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use transcribe_rs::onnx::canary::{CanaryModel, CanaryParams};
 use transcribe_rs::onnx::parakeet::{ParakeetModel, ParakeetParams, TimestampGranularity};
 use transcribe_rs::onnx::Quantization;
-use transcribe_rs::whisper_cpp::{WhisperEngine, WhisperInferenceParams};
 
+use crate::languages;
 use crate::models::EngineId;
 use crate::settings::Language;
+use crate::whisper::Whisper;
 
 pub const SAMPLE_RATE: u32 = 16_000;
 
 pub enum Engine {
     Parakeet(ParakeetModel),
     Canary(CanaryModel),
-    Whisper(WhisperEngine),
+    Whisper(Whisper),
 }
 
 impl Engine {
@@ -32,10 +34,30 @@ impl Engine {
                 CanaryModel::load(&asset.dir_path(), &Quantization::Int8).map_err(|e| anyhow!("Nie udało się wczytać Canary: {e}"))?,
             ),
             EngineId::WhisperTurbo | EngineId::WhisperLargeV3 => Engine::Whisper(
-                WhisperEngine::load(&asset.file_path(0))
-                    .map_err(|e| anyhow!("Nie udało się wczytać Whispera: {e}"))?,
+                Whisper::load(&asset.file_path(0)).map_err(|e| anyhow!("Nie udało się wczytać Whispera: {e}"))?,
             ),
         })
+    }
+
+    /// Czy model przepisze w tych językach (kody whisper.cpp; puste = sam rozpozna język,
+    /// kilka = rozmowa mieszana). Sprawdzane przed wczytaniem modelu.
+    pub fn check_languages(id: EngineId, languages: &[String]) -> Result<()> {
+        if let Some(code) = languages.iter().find(|c| languages::name(c).is_none()) {
+            bail!("Nieznany język „{code}”");
+        }
+        let model = id.asset().title;
+        match id {
+            EngineId::WhisperTurbo | EngineId::WhisperLargeV3 => {}
+            EngineId::CanaryV2 if languages.len() > 1 => {
+                bail!("{model} nie rozpoznaje języka sam — rozmowę w kilku językach przepisz Whisperem albo Parakeetem")
+            }
+            EngineId::ParakeetV3 | EngineId::CanaryV2 => {
+                if let Some(code) = languages.iter().find(|c| !languages::EUROPEAN.contains(&c.as_str())) {
+                    bail!("{model} nie zna języka: {} — wybierz Whispera", languages::name(code).unwrap_or(code));
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Czy silnik umie tłumaczyć na `target` (Canary: między angielskim a resztą swoich
@@ -54,7 +76,13 @@ impl Engine {
     /// Zwraca sam tekst (bez postprocessingu). Parakeet v3 sam rozpoznaje język;
     /// Whisper dostaje kod języka albo autodetekcję.
     pub fn transcribe(&mut self, samples: &[f32], language: Language) -> Result<String> {
-        self.run(samples, language, None)
+        self.transcribe_in(samples, language.code().as_slice())
+    }
+
+    /// Jak `transcribe`, ale z listą języków (zob. `check_languages`). Przy kilku Whisper
+    /// najpierw rozpoznaje, w którym z nich jest wypowiedź, i przepisuje w tym języku.
+    pub fn transcribe_in(&mut self, samples: &[f32], languages: &[&str]) -> Result<String> {
+        self.run(samples, languages, None)
     }
 
     /// Tłumaczenie mowy na `target` (kod języka, np. „en”) — zob. `can_translate`.
@@ -62,10 +90,10 @@ impl Engine {
         if !self.can_translate(language, target) {
             return Err(anyhow!("Ten model nie tłumaczy z {} na {target}", language.code().unwrap_or("auto")));
         }
-        self.run(samples, language, Some(target))
+        self.run(samples, language.code().as_slice(), Some(target))
     }
 
-    fn run(&mut self, samples: &[f32], language: Language, target: Option<&str>) -> Result<String> {
+    fn run(&mut self, samples: &[f32], languages: &[&str], target: Option<&str>) -> Result<String> {
         if samples.len() < (SAMPLE_RATE as usize) / 10 {
             return Ok(String::new());
         }
@@ -87,20 +115,25 @@ impl Engine {
             }
             Engine::Canary(m) => {
                 // Canary nie rozpoznaje języka sam — „automatycznie” traktujemy jak polski.
+                let source = match languages {
+                    [] => "pl",
+                    [one] => one,
+                    _ => bail!("Canary nie rozpoznaje języka sam — wybierz jeden język"),
+                };
                 let params = CanaryParams {
-                    language: Some(language.code().unwrap_or("pl").to_string()),
+                    language: Some(source.to_string()),
                     target_language: target.map(str::to_string),
                     ..Default::default()
                 };
                 m.transcribe_with(samples, &params).map_err(|e| anyhow!("Canary: {e}"))?.text
             }
             Engine::Whisper(w) => {
-                let params = WhisperInferenceParams {
-                    language: language.code().map(str::to_string),
-                    translate: target == Some("en"),
-                    ..Default::default()
+                let language = match languages {
+                    [] => None,
+                    [one] => Some(*one),
+                    many => Some(w.detect_language(samples, many).map_err(|e| anyhow!("Whisper: {e}"))?),
                 };
-                w.transcribe_with(samples, &params).map_err(|e| anyhow!("Whisper: {e}"))?.text
+                w.transcribe(samples, language, target == Some("en")).map_err(|e| anyhow!("Whisper: {e}"))?
             }
         };
         Ok(text.trim().to_string())
@@ -114,9 +147,32 @@ mod tests {
     use std::sync::atomic::AtomicBool;
 
     fn fixture() -> Vec<f32> {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/fleurs_kobieta.wav");
+        fixture_named("fleurs_kobieta.wav")
+    }
+
+    fn fixture_named(name: &str) -> Vec<f32> {
+        let path = format!("{}/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"));
         let mut r = hound::WavReader::open(path).unwrap();
         r.samples::<i16>().map(|s| s.unwrap() as f32 / 32768.0).collect()
+    }
+
+    fn langs(codes: &[&str]) -> Vec<String> {
+        codes.iter().map(|c| c.to_string()).collect()
+    }
+
+    #[test]
+    fn language_choice_is_checked_per_model() {
+        let whisper = EngineId::WhisperTurbo;
+        assert!(Engine::check_languages(whisper, &langs(&["pl", "en", "ja"])).is_ok());
+        assert!(Engine::check_languages(whisper, &[]).is_ok());
+        assert!(Engine::check_languages(whisper, &langs(&["xx"])).is_err());
+        // Canary: jeden język i tylko europejski.
+        assert!(Engine::check_languages(EngineId::CanaryV2, &langs(&["de"])).is_ok());
+        assert!(Engine::check_languages(EngineId::CanaryV2, &langs(&["pl", "en"])).is_err());
+        assert!(Engine::check_languages(EngineId::CanaryV2, &langs(&["ja"])).is_err());
+        // Parakeet rozpoznaje sam, ale tylko spośród europejskich.
+        assert!(Engine::check_languages(EngineId::ParakeetV3, &langs(&["pl", "en"])).is_ok());
+        assert!(Engine::check_languages(EngineId::ParakeetV3, &langs(&["pl", "ja"])).is_err());
     }
 
     fn ensure(asset: &Asset) {
@@ -185,6 +241,26 @@ mod tests {
         let got = words(&text);
         assert!(got.contains(&"visa".to_string()), "{text}");
         assert!(!got.contains(&"wizy".to_string()), "{text}");
+    }
+
+    /// Rozmowa mieszana: każda wypowiedź w języku wybranym spośród zaznaczonych.
+    /// `cargo test -- --ignored whisper_turbo_picks`.
+    #[test]
+    #[ignore]
+    fn whisper_turbo_picks_the_language_among_chosen() {
+        ensure(EngineId::WhisperTurbo.asset());
+        let Engine::Whisper(mut w) = Engine::load(EngineId::WhisperTurbo).unwrap() else { unreachable!() };
+        let (pl, en) = (fixture(), fixture_named("en_samantha.wav"));
+        assert_eq!(w.detect_language(&pl, &["en", "pl"]).unwrap(), "pl");
+        assert_eq!(w.detect_language(&en, &["pl", "en"]).unwrap(), "en");
+        let mut e = Engine::Whisper(w);
+        let text = e.transcribe_in(&en, &["pl", "en"]).unwrap();
+        println!("en: {text}");
+        let got = words(&text);
+        assert!(["quarterly", "report", "team", "friday"].iter().all(|w| got.contains(&w.to_string())), "{text}");
+        let text = e.transcribe_in(&pl, &["pl", "en"]).unwrap();
+        println!("pl: {text}");
+        assert!(words(&text).contains(&"wizy".to_string()), "{text}");
     }
 
     #[test]

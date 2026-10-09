@@ -15,6 +15,7 @@ import {
   type AudioTrack,
   type EngineId,
   type JobEvent,
+  type LanguageInfo,
   type LiveDrafts,
   type LivePayload,
   type Meeting,
@@ -25,6 +26,7 @@ import {
   type Utterance,
 } from "../api";
 import Markdown from "../components/Markdown";
+import LanguagePicker, { languageCheck } from "./LanguagePicker";
 
 type Tab = "summary" | "transcript";
 
@@ -200,17 +202,24 @@ function Detail({
   const [title, setTitle] = useState(m.title ?? "");
   const [summaryIndex, setSummaryIndex] = useState(0);
   const [exporting, setExporting] = useState<AudioExport | null>(null);
+  const [allLanguages, setAllLanguages] = useState<LanguageInfo[]>([]);
+  const [defaultLanguages, setDefaultLanguages] = useState<string[]>([]);
+  // Wybór użytkownika; `null` = jak przy ostatniej transkrypcji, a bez niej jak w ustawieniach.
+  const [chosenLanguages, setChosenLanguages] = useState<string[] | null>(null);
 
   useEffect(() => {
     api.getSettings().then((s: Settings) => {
       setEngine((e) => e ?? s.meeting_engine);
       setProvider((p) => p || s.ai_provider);
+      setDefaultLanguages(s.meeting_language === "auto" ? [] : [s.meeting_language]);
     });
     aiApi.providers().then(setProviders);
+    api.languages().then(setAllLanguages);
   }, []);
 
   useEffect(() => {
     setTitle(m.title ?? "");
+    setChosenLanguages(null);
     setEditing(false);
     setSummaryIndex(0);
     setTab(detail.summaries.length && !live ? "summary" : "transcript");
@@ -219,6 +228,8 @@ function Detail({
   const recording = m.state === "recording";
   const canTranscribe = !m.audioDeleted && !recording && !busy;
   const canSummarize = !!detail.transcript && !recording && !busy;
+  const languages = chosenLanguages ?? m.transcriptLanguages ?? defaultLanguages;
+  const languageStatus = languageCheck(engine, languages, allLanguages);
   const canExport = !recording && m.state !== "importing" && !exporting;
   const summary = detail.summaries[summaryIndex];
   const providerInfo = useMemo(() => providers.find((p) => p.id === provider), [providers, provider]);
@@ -293,7 +304,12 @@ function Detail({
               </option>
             ))}
           </select>
-          <button disabled={!canTranscribe} onClick={() => run(() => meetingsApi.transcribe(m.id, engine ?? undefined))}>
+          <LanguagePicker value={languages} languages={allLanguages} disabled={!canTranscribe} onChange={setChosenLanguages} />
+          <button
+            disabled={!canTranscribe || !!languageStatus.error}
+            title={languageStatus.error ?? ""}
+            onClick={() => run(() => meetingsApi.transcribe(m.id, engine ?? undefined, languages))}
+          >
             <Wand2 size={14} /> {detail.transcript ? "Przepisz ponownie" : "Przepisz"}
           </button>
         </div>
@@ -336,6 +352,10 @@ function Detail({
           </button>
         </div>
       </div>
+
+      {canTranscribe && (languageStatus.error || languageStatus.hint) && (
+        <div className={languageStatus.error ? "lang-status error" : "lang-status"}>{languageStatus.error ?? languageStatus.hint}</div>
+      )}
 
       {job && (
         <div className="job">

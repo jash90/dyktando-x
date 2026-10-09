@@ -5,7 +5,7 @@
 //! DX_EVAL_FILE=~/Downloads/rozmowa.mp3      plik audio (wymagany)
 //! DX_EVAL_FROM=600 DX_EVAL_SECONDS=180      wycinek (s), domyślnie całość
 //! DX_EVAL_ENGINE=parakeet|canary|whisper_turbo|whisper_large   domyślnie parakeet
-//! DX_EVAL_LANG=auto|pl                       domyślnie auto (jak w ustawieniach)
+//! DX_EVAL_LANG=auto|pl|pl,en                 domyślnie auto; kilka po przecinku = rozmowa mieszana
 //! DX_EVAL_REF=wzorzec.txt                    tekst wzorcowy → WER
 //! DX_EVAL_OUT=katalog                        gdzie zapisać transkrypt (.md i .txt)
 //! cargo test --release --lib -- --ignored eval_meeting --nocapture
@@ -20,7 +20,6 @@ use super::transcriber::{self, Options};
 use super::writer::{SegmentedWriter, RATE};
 use crate::audio::resample::StreamResampler;
 use crate::models::EngineId;
-use crate::settings::Language;
 
 /// Słowa do WER: małe litery, bez interpunkcji (cyfry i litery zostają).
 pub fn words(text: &str) -> Vec<String> {
@@ -98,9 +97,9 @@ fn eval_meeting() {
         "whisper_large" => EngineId::WhisperLargeV3,
         _ => EngineId::ParakeetV3,
     };
-    let language = match env("DX_EVAL_LANG").as_deref() {
-        Some("pl") => Language::Pl,
-        _ => Language::Auto,
+    let languages: Vec<String> = match env("DX_EVAL_LANG") {
+        Some(v) if v != "auto" => v.split(',').map(|c| c.trim().to_string()).collect(),
+        _ => Vec::new(),
     };
 
     // Wycinek pliku jako ścieżka „system” tymczasowego spotkania.
@@ -151,7 +150,7 @@ fn eval_meeting() {
         tuning.vad.threshold = v as f32;
     }
     println!("{tuning:?}");
-    let doc = transcriber::transcribe(&store, &meeting.id, &Options { engine, language, diarize: true, tuning }, &AtomicBool::new(false), |_| {}).unwrap();
+    let doc = transcriber::transcribe(&store, &meeting.id, &Options { engine, languages: languages.clone(), diarize: true, tuning }, &AtomicBool::new(false), |_| {}).unwrap();
     let asr_s = t.elapsed().as_secs_f64();
 
     let mut per_speaker: BTreeMap<String, (usize, f64)> = BTreeMap::new();
@@ -163,7 +162,7 @@ fn eval_meeting() {
     let text: String = doc.utterances.iter().map(|u| u.text.as_str()).collect::<Vec<_>>().join(" ");
     let foreign: Vec<&str> = doc.utterances.iter().filter(|u| looks_foreign(&u.text)).map(|u| u.text.as_str()).collect();
 
-    println!("== {} [{from:.0} s +{:.0} s] {:?} {:?}", file.display(), samples as f64 / RATE as f64, engine, language);
+    println!("== {} [{from:.0} s +{:.0} s] {:?} {:?}", file.display(), samples as f64 / RATE as f64, engine, languages);
     println!("dekodowanie {decode_s:.1} s, transkrypcja {asr_s:.1} s ({:.1}× czasu rzeczywistego)", samples as f64 / RATE as f64 / asr_s);
     println!("mówcy ({}):", per_speaker.len());
     for (name, (n, secs)) in &per_speaker {

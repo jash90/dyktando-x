@@ -12,7 +12,6 @@ use super::transcript::{self, SpeakerSegment, Track, TranscriptDocument, Utteran
 use super::vad;
 use crate::engine::Engine;
 use crate::models::{self, AssetId, EngineId};
-use crate::settings::Language;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Progress {
@@ -41,7 +40,8 @@ pub fn is_noise(text: &str, seconds: f64) -> bool {
 
 pub struct Options {
     pub engine: EngineId,
-    pub language: Language,
+    /// Kody języków (whisper.cpp): puste = silnik rozpoznaje sam, kilka = rozmowa mieszana.
+    pub languages: Vec<String>,
     pub diarize: bool,
     pub tuning: Tuning,
 }
@@ -65,6 +65,8 @@ pub fn transcribe(store: &Store, id: &str, opts: &Options, cancel: &AtomicBool, 
             return Err(anyhow!("Brak modelu {} — pobierz go w Ustawieniach → Modele", needed.title));
         }
     }
+    Engine::check_languages(opts.engine, &opts.languages)?;
+    let languages: Vec<&str> = opts.languages.iter().map(String::as_str).collect();
     let speaker_model = models::asset(AssetId::SpeakerModel);
     let diarize = opts.diarize && meeting.has_system_audio && speaker_model.is_installed();
     let is_cancelled = || cancel.load(Ordering::Relaxed);
@@ -96,7 +98,7 @@ pub fn transcribe(store: &Store, id: &str, opts: &Options, cancel: &AtomicBool, 
     let mut mic: Vec<Utterance> = Vec::new();
     vad::for_each_segment(&audio, MIC, &mic_segs, |i, samples| {
         check()?;
-        let text = engine.transcribe(samples, opts.language)?;
+        let text = engine.transcribe_in(samples, &languages)?;
         if !is_noise(&text, mic_segs[i].1 - mic_segs[i].0) {
             mic.push(Utterance { start: mic_segs[i].0, end: mic_segs[i].1, track: Track::Mic, text, speaker: String::new(), translation: None });
         }
@@ -109,7 +111,7 @@ pub fn transcribe(store: &Store, id: &str, opts: &Options, cancel: &AtomicBool, 
     let mut voices: Vec<(f64, Option<Vec<f32>>)> = Vec::new();
     vad::for_each_segment(&audio, SYSTEM, &sys_segs, |i, samples| {
         check()?;
-        let text = engine.transcribe(samples, opts.language)?;
+        let text = engine.transcribe_in(samples, &languages)?;
         let (start, end) = sys_segs[i];
         if !is_noise(&text, end - start) {
             system.push(Utterance { start, end, track: Track::System, text, speaker: String::new(), translation: None });
@@ -222,7 +224,7 @@ mod tests {
         store.update(&meeting.id, |x| x.state = State::Recorded).unwrap();
 
         let t = std::time::Instant::now();
-        let opts = Options { engine: EngineId::ParakeetV3, language: Language::Pl, diarize: true, tuning: Tuning::default() };
+        let opts = Options { engine: EngineId::ParakeetV3, languages: vec!["pl".into()], diarize: true, tuning: Tuning::default() };
         let doc = transcribe(&store, &meeting.id, &opts, &AtomicBool::new(false), |_| {}).unwrap();
         let md = std::fs::read_to_string(store.transcript_md(&meeting.id)).unwrap();
         println!("{:.1} s nagrania w {:.1} s\n{md}", sys.len() as f64 / 16_000.0, t.elapsed().as_secs_f64());

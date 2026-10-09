@@ -44,6 +44,9 @@ pub struct Meeting {
     pub audio_deleted: bool,
     #[serde(default)]
     pub transcript_engine: Option<String>,
+    /// Języki ostatniej transkrypcji (puste = rozpoznane przez silnik); `None` = sprzed tej opcji.
+    #[serde(default)]
+    pub transcript_languages: Option<Vec<String>>,
     #[serde(default)]
     pub last_error: Option<String>,
 }
@@ -114,6 +117,7 @@ impl Store {
             title: None,
             audio_deleted: false,
             transcript_engine: None,
+            transcript_languages: None,
             last_error: None,
         };
         self.save(&m)?;

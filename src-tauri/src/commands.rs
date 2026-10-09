@@ -264,8 +264,8 @@ pub async fn import_meeting(app: AppHandle) -> Result<Option<Meeting>, String> {
 }
 
 #[tauri::command]
-pub async fn transcribe_meeting(app: AppHandle, id: String, engine: Option<EngineId>) -> Result<(), String> {
-    processing::transcribe(app, id, engine).await.map_err(|e| e.to_string())
+pub async fn transcribe_meeting(app: AppHandle, id: String, engine: Option<EngineId>, languages: Option<Vec<String>>) -> Result<(), String> {
+    processing::transcribe(app, id, engine, languages).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
