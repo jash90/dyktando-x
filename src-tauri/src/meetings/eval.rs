@@ -6,6 +6,7 @@
 //! DX_EVAL_FROM=600 DX_EVAL_SECONDS=180      wycinek (s), domyślnie całość
 //! DX_EVAL_ENGINE=parakeet|canary|whisper_turbo|whisper_large   domyślnie parakeet
 //! DX_EVAL_LANG=auto|pl|pl,en                 domyślnie auto; kilka po przecinku = rozmowa mieszana
+//! DX_EVAL_VOCAB="NPaw, Tizen"              słownik nazw dla Whispera
 //! DX_EVAL_REF=wzorzec.txt                    tekst wzorcowy → WER
 //! DX_EVAL_OUT=katalog                        gdzie zapisać transkrypt (.md i .txt)
 //! cargo test --release --lib -- --ignored eval_meeting --nocapture
@@ -150,7 +151,7 @@ fn eval_meeting() {
         tuning.vad.threshold = v as f32;
     }
     println!("{tuning:?}");
-    let doc = transcriber::transcribe(&store, &meeting.id, &Options { engine, languages: languages.clone(), diarize: true, tuning }, &AtomicBool::new(false), |_| {}).unwrap();
+    let doc = transcriber::transcribe(&store, &meeting.id, &Options { engine, languages: languages.clone(), vocabulary: env("DX_EVAL_VOCAB").unwrap_or_default(), diarize: true, tuning }, &AtomicBool::new(false), |_| {}).unwrap();
     let asr_s = t.elapsed().as_secs_f64();
 
     let mut per_speaker: BTreeMap<String, (usize, f64)> = BTreeMap::new();

@@ -224,6 +224,8 @@ pub struct Config {
     /// Kod języka tłumaczenia (np. „en”); `None` = bez tłumaczenia. Tłumaczy zawsze Canary
     /// (jedyny model z tłumaczeniem w obie strony), niezależnie od `engine`.
     pub translate_to: Option<String>,
+    /// Słownik nazw i terminów (podpowiedź dla Whispera).
+    pub vocabulary: String,
 }
 
 impl Config {
@@ -328,7 +330,8 @@ impl Live {
             let loaded = (|| -> Result<_> {
                 let mic = Segmenter::new(&vad_path, Params::default())?;
                 let system = Segmenter::new(&vad_path, Params::default())?;
-                let engine = Engine::load(engine_id)?;
+                let mut engine = Engine::load(engine_id)?;
+                engine.set_vocabulary(&config.vocabulary);
                 Ok((mic, system, engine))
             })();
             let (mut mic, mut system, mut engine) = match loaded {
@@ -543,7 +546,7 @@ mod tests {
         let got = Arc::new(Mutex::new(Vec::new()));
         let g = got.clone();
         let live = Live::start(
-            Config { engine: EngineId::ParakeetV3, language: Language::Pl, translate_to: None },
+            Config { engine: EngineId::ParakeetV3, language: Language::Pl, translate_to: None, vocabulary: String::new() },
             Box::new(move |e| g.lock().unwrap().push(e)),
         )
         .unwrap();
@@ -572,7 +575,7 @@ mod tests {
         let got = Arc::new(Mutex::new(Vec::new()));
         let g = got.clone();
         let live = Live::start(
-            Config { engine: EngineId::ParakeetV3, language: Language::Pl, translate_to: None },
+            Config { engine: EngineId::ParakeetV3, language: Language::Pl, translate_to: None, vocabulary: String::new() },
             Box::new(move |e| g.lock().unwrap().push((Instant::now(), e))),
         )
         .unwrap();
@@ -598,7 +601,7 @@ mod tests {
     fn live_translates_to_english_with_canary() {
         let audio = fixture("fleurs_kobieta.wav");
         let live = Live::start(
-            Config { engine: EngineId::ParakeetV3, language: Language::Pl, translate_to: Some("en".into()) },
+            Config { engine: EngineId::ParakeetV3, language: Language::Pl, translate_to: Some("en".into()), vocabulary: String::new() },
             Box::new(|_| {}),
         )
         .unwrap();
@@ -618,7 +621,7 @@ mod tests {
 
     #[test]
     fn translation_requires_english_on_one_side() {
-        let bad = Config { engine: EngineId::ParakeetV3, language: Language::Pl, translate_to: Some("de".into()) };
+        let bad = Config { engine: EngineId::ParakeetV3, language: Language::Pl, translate_to: Some("de".into()), vocabulary: String::new() };
         let err = Live::start(bad, Box::new(|_| {})).err().map(|e| e.to_string()).unwrap_or_default();
         assert!(err.contains("angielskim") || err.contains("Brak modelu"), "{err}");
     }

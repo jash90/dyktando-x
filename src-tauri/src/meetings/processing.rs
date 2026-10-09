@@ -75,25 +75,59 @@ fn event(id: &str, kind: JobKind, step: impl Into<String>, fraction: f32) -> Job
     JobEvent { meeting_id: id.into(), kind, step: step.into(), fraction, finished: false, error: None }
 }
 
-/// Małe modele potrzebne do spotkań (VAD 2 MB, mówcy 27 MB) dociągamy same, bez pytania.
-async fn ensure_support_models(app: &AppHandle, id: &str, diarize: bool) -> Result<()> {
-    let mut needed = vec![AssetId::SileroVad];
+/// Pobiera brakujące modele potrzebne do przepisania: VAD (2 MB), model mówców (27 MB) i sam
+/// silnik (np. Whisper ustawiony jako domyślny, ale jeszcze niepobrany — 1,6 GB). Pobieranie
+/// jest widoczne (i do przerwania) także w Ustawieniach → Modele; „Przerwij” przy spotkaniu
+/// też je przerywa. Gdy ten sam model już się pobiera z Ustawień, czekamy na koniec.
+async fn ensure_support_models(app: &AppHandle, id: &str, diarize: bool, engine: EngineId, cancel: &Arc<AtomicBool>) -> Result<()> {
+    let mut needed = vec![models::asset(AssetId::SileroVad)];
     if diarize {
-        needed.push(AssetId::SpeakerModel);
+        needed.push(models::asset(AssetId::SpeakerModel));
     }
-    for a in needed {
-        let asset = models::asset(a);
-        if asset.is_installed() {
-            continue;
+    needed.push(engine.asset());
+    let state = app.state::<AppState>();
+    for asset in needed {
+        let key = crate::asset_key(asset.id);
+        loop {
+            if asset.is_installed() || cancel.load(Ordering::Relaxed) {
+                break;
+            }
+            let ours = {
+                let mut d = state.downloads.lock().unwrap();
+                if d.contains_key(&key) {
+                    false
+                } else {
+                    d.insert(key.clone(), cancel.clone());
+                    true
+                }
+            };
+            if !ours {
+                emit(app, event(id, JobKind::Transcribe, format!("Czekam na pobieranie: {}", asset.title), 0.0));
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                continue;
+            }
+            let (app2, title, key2) = (app.clone(), asset.title, key.clone());
+            let mut last_percent = u32::MAX;
+            let result = asset
+                .download(cancel, move |done, total| {
+                    let f = if total > 0 { done as f32 / total as f32 } else { 0.0 };
+                    let percent = (f * 100.0) as u32;
+                    if percent != last_percent {
+                        last_percent = percent;
+                        emit(&app2, event(id, JobKind::Transcribe, format!("Pobieranie: {title} ({percent}%)"), f * 0.05));
+                        // Ten sam postęp w Ustawieniach → Modele.
+                        let _ = app2.emit("model-download", crate::DownloadEvent { key: key2.clone(), done, total, finished: false, error: None });
+                    }
+                })
+                .await;
+            state.downloads.lock().unwrap().remove(&key);
+            let error = result.as_ref().err().map(|e| e.to_string());
+            let _ = app.emit("model-download", crate::DownloadEvent { key: key.clone(), done: 0, total: 0, finished: true, error });
+            result?;
         }
-        let app2 = app.clone();
-        let title = asset.title;
-        asset
-            .download(&AtomicBool::new(false), move |done, total| {
-                let f = if total > 0 { done as f32 / total as f32 } else { 0.0 };
-                emit(&app2, event(id, JobKind::Transcribe, format!("Pobieranie: {title}"), f * 0.05));
-            })
-            .await?;
+        if cancel.load(Ordering::Relaxed) {
+            return Err(anyhow!("Przerwano"));
+        }
     }
     Ok(())
 }
@@ -111,15 +145,27 @@ pub async fn transcribe(app: AppHandle, id: String, engine: Option<EngineId>, la
             m.last_error = None;
         })?;
         emit(&app, event(&id, JobKind::Transcribe, "Przygotowanie", 0.0));
-        ensure_support_models(&app, &id, settings.meeting_diarization).await?;
+        let engine = engine.unwrap_or(settings.meeting_engine);
         let languages = languages.unwrap_or_else(|| settings.meeting_language.code().map(String::from).into_iter().collect());
-        let opts = Options { engine: engine.unwrap_or(settings.meeting_engine), languages: languages.clone(), diarize: settings.meeting_diarization, tuning: Default::default() };
-        let (app2, id2, store2, cancel2) = (app.clone(), id.clone(), store.clone(), cancel.clone());
-        let r = tauri::async_runtime::spawn_blocking(move || {
-            transcriber::transcribe(&store2, &id2, &opts, &cancel2, |p| emit(&app2, event(&id2, JobKind::Transcribe, p.step, p.fraction)))
-        })
-        .await
-        .map_err(|e| anyhow!("{e}"))?;
+        // Pobieranie modeli i transkrypcja razem: błąd albo przerwanie którejkolwiek części
+        // przywraca stan spotkania niżej (a nie zostawia go w „przepisywaniu”).
+        let r = async {
+            ensure_support_models(&app, &id, settings.meeting_diarization, engine, &cancel).await?;
+            let opts = Options {
+                engine,
+                languages: languages.clone(),
+                vocabulary: settings.vocabulary.clone(),
+                diarize: settings.meeting_diarization,
+                tuning: Default::default(),
+            };
+            let (app2, id2, store2, cancel2) = (app.clone(), id.clone(), store.clone(), cancel.clone());
+            tauri::async_runtime::spawn_blocking(move || {
+                transcriber::transcribe(&store2, &id2, &opts, &cancel2, |p| emit(&app2, event(&id2, JobKind::Transcribe, p.step, p.fraction)))
+            })
+            .await
+            .map_err(|e| anyhow!("{e}"))?
+        }
+        .await;
         match r {
             Ok(doc) => {
                 store.update(&id, |m| {

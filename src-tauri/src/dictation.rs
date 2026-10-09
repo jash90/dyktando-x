@@ -191,6 +191,7 @@ fn transcribe_and_insert(
             *guard = Some((settings.engine, Engine::load(settings.engine)?));
         }
         let (_, e) = guard.as_mut().expect("silnik wczytany");
+        e.set_vocabulary(&settings.vocabulary);
         e.transcribe(&audio16, settings.language)?
     };
     log::info!(

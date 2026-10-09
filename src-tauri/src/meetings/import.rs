@@ -274,7 +274,7 @@ mod tests {
         let doc = transcriber::transcribe(
             &s,
             &m.id,
-            &Options { engine: crate::models::EngineId::ParakeetV3, languages: vec!["pl".into()], diarize: true, tuning: Default::default() },
+            &Options { engine: crate::models::EngineId::ParakeetV3, languages: vec!["pl".into()], vocabulary: String::new(), diarize: true, tuning: Default::default() },
             &AtomicBool::new(false),
             |_| {},
         )

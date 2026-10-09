@@ -11,6 +11,24 @@ pub struct Whisper {
     // Kolejność ma znaczenie: stan zwalniamy przed kontekstem.
     state: WhisperState,
     _context: WhisperContext,
+    /// Podpowiedź na start (słownik nazw i terminów) — Whisper chętniej pisze je poprawnie.
+    prompt: Option<String>,
+}
+
+/// Dłuższy słownik i tak by się nie zmieścił (Whisper bierze ok. 220 tokenów podpowiedzi).
+const MAX_PROMPT_CHARS: usize = 600;
+
+/// Słowa do porównań: małe litery, bez interpunkcji.
+fn plain(text: &str) -> String {
+    text.to_lowercase().split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect::<Vec<_>>().join(" ")
+}
+
+/// Na dźwięku bez słów Whisper potrafi „przeczytać” samą podpowiedź (albo jej kawałek). Jedno
+/// słowo zostawiamy — to częściej prawdziwe zawołanie po imieniu („Borys?”) niż echo; całe
+/// słowa porównujemy, więc „ci” nie pasuje do „CI/CD”, a „se” do „Hisense”.
+fn is_prompt_echo(text: &str, prompt: &str) -> bool {
+    let t = plain(text);
+    t.contains(' ') && format!(" {} ", plain(prompt)).contains(&format!(" {t} "))
 }
 
 /// Wątki dla rozpoznania języka (whisper.cpp przy dekodowaniu sam bierze min(4, rdzenie)).
@@ -31,7 +49,13 @@ impl Whisper {
         let path = path.to_str().context("Ścieżka modelu nie jest UTF-8")?;
         let context = WhisperContext::new_with_params(path, params).map_err(|e| anyhow!("{e}"))?;
         let state = context.create_state().map_err(|e| anyhow!("{e}"))?;
-        Ok(Self { state, _context: context })
+        Ok(Self { state, _context: context, prompt: None })
+    }
+
+    /// Słownik nazw i terminów (np. „NPaw, Hisense, Tizen, CI/CD”); pusty = bez podpowiedzi.
+    pub fn set_vocabulary(&mut self, vocabulary: &str) {
+        let v = vocabulary.split_whitespace().collect::<Vec<_>>().join(" ");
+        self.prompt = (!v.is_empty()).then(|| v.chars().take(MAX_PROMPT_CHARS).collect());
     }
 
     /// Najbardziej prawdopodobny z `candidates` (kody whisper.cpp) język wypowiedzi.
@@ -59,12 +83,37 @@ impl Whisper {
         params.set_suppress_nst(true);
         params.set_no_speech_thold(0.2);
         params.set_no_context(true);
+        if let Some(prompt) = self.prompt.as_deref() {
+            params.set_initial_prompt(prompt);
+        }
         self.state.full(params, samples).map_err(|e| anyhow!("{e}"))?;
         let mut text = String::new();
         for i in 0..self.state.full_n_segments() {
             let segment = self.state.get_segment(i).ok_or_else(|| anyhow!("brak segmentu {i}"))?;
             text.push_str(segment.to_str().map_err(|e| anyhow!("{e}"))?);
         }
+        if self.prompt.as_deref().is_some_and(|p| is_prompt_echo(&text, p)) {
+            return Ok(String::new());
+        }
         Ok(text.trim().to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_read_out_prompt_is_not_an_utterance() {
+        let prompt = "NPaw, Hisense, Tizen, CI/CD, Klaudiusz";
+        assert!(is_prompt_echo("NPaw, Hisense, Tizen, CI/CD, Klaudiusz.", prompt));
+        assert!(is_prompt_echo(" Hisense, Tizen", prompt));
+        assert!(!is_prompt_echo("Wczoraj na Hisense coś tam patrzyłem", prompt));
+        assert!(!is_prompt_echo("...", prompt));
+        // Jedno słowo (nawet ze słownika) to prawdziwa wypowiedź.
+        assert!(!is_prompt_echo("Klaudiusz?", prompt));
+        assert!(!is_prompt_echo("Ci", prompt));
+        // Tylko całe słowa: „sense tizen” to nie kawałek „Hisense, Tizen”.
+        assert!(!is_prompt_echo("sense Tizen", prompt));
     }
 }

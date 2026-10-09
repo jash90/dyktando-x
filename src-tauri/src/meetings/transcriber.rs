@@ -42,6 +42,8 @@ pub struct Options {
     pub engine: EngineId,
     /// Kody języków (whisper.cpp): puste = silnik rozpoznaje sam, kilka = rozmowa mieszana.
     pub languages: Vec<String>,
+    /// Słownik nazw i terminów (podpowiedź dla Whispera); pusty = bez.
+    pub vocabulary: String,
     pub diarize: bool,
     pub tuning: Tuning,
 }
@@ -88,6 +90,7 @@ pub fn transcribe(store: &Store, id: &str, opts: &Options, cancel: &AtomicBool, 
     // 2) Transkrypcja fragmentów.
     progress(Progress { step: "Wczytywanie modelu".into(), fraction: 0.05 });
     let mut engine = Engine::load(opts.engine)?;
+    engine.set_vocabulary(&opts.vocabulary);
     let mut embedder = if diarize { Some(Embedder::load(&speaker_model.file_path(0))?) } else { None };
     let mut done = 0usize;
     let step = |label: &str, done: usize| Progress {
@@ -224,7 +227,7 @@ mod tests {
         store.update(&meeting.id, |x| x.state = State::Recorded).unwrap();
 
         let t = std::time::Instant::now();
-        let opts = Options { engine: EngineId::ParakeetV3, languages: vec!["pl".into()], diarize: true, tuning: Tuning::default() };
+        let opts = Options { engine: EngineId::ParakeetV3, languages: vec!["pl".into()], vocabulary: String::new(), diarize: true, tuning: Tuning::default() };
         let doc = transcribe(&store, &meeting.id, &opts, &AtomicBool::new(false), |_| {}).unwrap();
         let md = std::fs::read_to_string(store.transcript_md(&meeting.id)).unwrap();
         println!("{:.1} s nagrania w {:.1} s\n{md}", sys.len() as f64 / 16_000.0, t.elapsed().as_secs_f64());
