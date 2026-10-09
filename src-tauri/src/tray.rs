@@ -9,6 +9,7 @@ use crate::AppState;
 pub struct TrayItems {
     pub meeting: MenuItem<Wry>,
     pub status: MenuItem<Wry>,
+    pub update: MenuItem<Wry>,
 }
 
 pub fn build(app: &AppHandle) -> tauri::Result<TrayItems> {
@@ -16,10 +17,11 @@ pub fn build(app: &AppHandle) -> tauri::Result<TrayItems> {
     let status = MenuItem::with_id(app, "status", "", false, None::<&str>)?;
     let meetings = MenuItem::with_id(app, "meetings", "Spotkania…", true, None::<&str>)?;
     let settings = MenuItem::with_id(app, "settings", "Ustawienia…", true, None::<&str>)?;
+    let update = MenuItem::with_id(app, "update", "Sprawdź aktualizacje…", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Zakończ Dyktando X", true, Some("CmdOrCtrl+Q"))?;
     let menu = Menu::with_items(
         app,
-        &[&meeting, &status, &PredefinedMenuItem::separator(app)?, &meetings, &settings, &PredefinedMenuItem::separator(app)?, &quit],
+        &[&meeting, &status, &PredefinedMenuItem::separator(app)?, &meetings, &settings, &update, &PredefinedMenuItem::separator(app)?, &quit],
     )?;
     // macOS: monochromatyczny szablon (system sam dobiera kolor do jasnego/ciemnego paska).
     #[cfg(target_os = "macos")]
@@ -35,11 +37,12 @@ pub fn build(app: &AppHandle) -> tauri::Result<TrayItems> {
             "meeting" => crate::commands::toggle_meeting_from(app),
             "meetings" => crate::show_window(app, crate::Window::Meetings),
             "settings" => crate::show_window(app, crate::Window::Settings),
+            "update" => crate::updater::open_from_tray(app),
             "quit" => app.exit(0),
             _ => {}
         })
         .build(app)?;
-    Ok(TrayItems { meeting, status })
+    Ok(TrayItems { meeting, status, update })
 }
 
 /// Odświeża napisy w menu i licznik przy ikonie (macOS: tytuł obok ikony).
@@ -47,8 +50,12 @@ pub fn refresh(app: &AppHandle) {
     let Some(state) = app.try_state::<AppState>() else { return };
     let rec = state.recorder.status();
     let job = state.jobs.current();
-    let Some(items) = state.tray.lock().unwrap().as_ref().map(|t| (t.meeting.clone(), t.status.clone())) else { return };
-    let (meeting, status) = items;
+    let Some(items) = state.tray.lock().unwrap().as_ref().map(|t| (t.meeting.clone(), t.status.clone(), t.update.clone())) else { return };
+    let (meeting, status, update) = items;
+    let _ = update.set_text(match app.state::<crate::updater::Updates>().available_version() {
+        Some(v) => format!("Zainstaluj aktualizację {v}…"),
+        None => "Sprawdź aktualizacje…".into(),
+    });
     let _ = meeting.set_text(if rec.recording { format!("Zatrzymaj nagrywanie ({})", clock(rec.seconds)) } else { "Nagraj spotkanie".into() });
     let status_text = match (&rec.warning, &job) {
         (Some(w), _) if rec.recording => w.clone(),

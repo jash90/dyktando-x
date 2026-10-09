@@ -18,6 +18,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": [
       "app",
       "dmg",
@@ -66,6 +67,17 @@
         "depends": [
           "pulseaudio-utils"
         ]
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEIyRTg5NzEwQkJBQTE0NTgKUldSWUZLcTdFSmZvc3VoOVpQYU1LWWo2L2RZNGFmM2lxdVJlQkxoT05rNlJqdVBscDhNRTFXdlYK",
+      "endpoints": [
+        "https://github.com/jash90/dyktando-x/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
       }
     }
   }

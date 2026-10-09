@@ -97,7 +97,25 @@ export const api = {
   pauseHotkeys: () => invoke<void>("pause_hotkeys"),
   autostartEnabled: () => invoke<boolean>("autostart_enabled"),
   setAutostart: (enabled: boolean) => invoke<void>("set_autostart", { enabled }),
+  checkUpdate: () => invoke<UpdateInfo | null>("check_update"),
+  installUpdate: () => invoke<void>("install_update"),
+  knownUpdate: () => invoke<UpdateInfo | null>("known_update"),
 };
+
+export interface UpdateInfo {
+  version: string;
+  current_version: string;
+  /** Notatki wydania (Markdown z GitHub Release). */
+  notes: string | null;
+  date: string | null;
+}
+
+export interface UpdateProgress {
+  done: number;
+  total: number;
+  finished: boolean;
+  error: string | null;
+}
 
 export function formatBytes(n: number): string {
   if (n >= 1e9) return `${(n / 1e9).toFixed(1).replace(".", ",")} GB`;

@@ -65,10 +65,14 @@ jobs:
             echo "macOS signing: no APPLE_* secrets — bundle left unsigned"
           fi
       # Windows: without a code-signing certificate SmartScreen warns on install.
+      # Aktualizacje OTA: tauri-action podpisuje paczki aktualizacji i wgrywa latest.json do release.
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
+          updaterJsonPreferNsis: true
           tagName: ${{ github.ref_name }}
           releaseName: 'Dyktando X ${{ github.ref_name }}'
           releaseDraft: true

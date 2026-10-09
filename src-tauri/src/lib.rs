@@ -18,6 +18,7 @@ mod paths;
 mod postprocess;
 mod settings;
 mod tray;
+mod updater;
 mod whisper;
 
 use serde::Serialize;
@@ -338,6 +339,8 @@ fn reload_hotkeys(app: AppHandle) -> Vec<String> {
 #[derive(Clone, Copy)]
 pub enum Window {
     Settings,
+    /// Ustawienia otwarte od razu na danym panelu (np. „system” z pozycji aktualizacji w trayu).
+    SettingsPane(&'static str),
     Meetings,
 }
 
@@ -345,11 +348,18 @@ pub enum Window {
 /// utworzone na starcie nie ma sensu, a zjada pamięć procesu WebKit/WebView2.
 pub fn show_window(app: &AppHandle, which: Window) {
     let (label, url, title, size, min) = match which {
-        Window::Settings => ("main", "index.html", "Dyktando X — Ustawienia", (860.0, 620.0), (720.0, 480.0)),
-        Window::Meetings => ("meetings", "index.html#meetings", "Dyktando X — Spotkania", (1040.0, 700.0), (760.0, 480.0)),
+        Window::Settings => ("main", "index.html".to_string(), "Dyktando X — Ustawienia", (860.0, 620.0), (720.0, 480.0)),
+        Window::SettingsPane(pane) => ("main", format!("index.html#{pane}"), "Dyktando X — Ustawienia", (860.0, 620.0), (720.0, 480.0)),
+        Window::Meetings => ("meetings", "index.html#meetings".to_string(), "Dyktando X — Spotkania", (1040.0, 700.0), (760.0, 480.0)),
     };
     let window = match app.get_webview_window(label) {
-        Some(w) => w,
+        Some(w) => {
+            // Okno już istnieje — panel przełącza zdarzenie (adres zna tylko nowe okno).
+            if let Window::SettingsPane(pane) = which {
+                let _ = app.emit_to(label, "open-pane", pane);
+            }
+            w
+        }
         None => match tauri::WebviewWindowBuilder::new(app, label, tauri::WebviewUrl::App(url.into()))
             .title(title)
             .inner_size(size.0, size.1)
@@ -400,6 +410,8 @@ pub fn run() {
         // Windows przez rejestr Run, Linux przez ~/.config/autostart.
         .plugin(autostart_plugin())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(updater::Updates::default())
         .manage(AppState {
             settings: Mutex::new(settings),
             dictation: Dictation::default(),
@@ -454,6 +466,9 @@ pub fn run() {
             autostart_enabled,
             set_autostart,
             open_meetings,
+            updater::check_update,
+            updater::install_update,
+            updater::known_update,
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]
@@ -465,6 +480,7 @@ pub fn run() {
             start_background(&handle);
             hud::create(&handle)?;
             apply_hotkeys(&handle);
+            updater::check_on_startup(&handle);
             let s = settings_snapshot(&handle);
             handle.state::<AppState>().dictation.preload(s.engine);
             if std::env::args().any(|a| a == "--meetings") {
