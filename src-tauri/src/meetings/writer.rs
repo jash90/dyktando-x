@@ -192,18 +192,27 @@ pub fn track_duration_samples(dir: &Path, prefix: &str) -> u64 {
 }
 
 /// Kolejne próbki ścieżki (wszystkie segmenty po kolei) bez trzymania całości w RAM.
-/// Uszkodzony segment pomijamy, a ucięty kończymy na ostatniej poprawnej próbce (jak `read_track`).
+/// Każdy segment poza ostatnim ma dokładnie `SEGMENT_SECONDS` — uszkodzony albo ucięty
+/// dopełniamy ciszą do tej długości, żeby dalsza część ścieżki nie przesunęła się w czasie
+/// (w miksie rozjechałyby się strony rozmowy).
 fn track_samples(dir: &Path, prefix: &str) -> impl Iterator<Item = i16> {
-    segments(dir, prefix)
-        .into_iter()
-        .filter_map(|path| match hound::WavReader::open(&path) {
-            Ok(r) => Some(r),
+    let paths = segments(dir, prefix);
+    let last = paths.len().saturating_sub(1);
+    let full = (SEGMENT_SECONDS * RATE as u64) as usize;
+    paths.into_iter().enumerate().flat_map(move |(i, path)| {
+        let samples: Box<dyn Iterator<Item = i16>> = match hound::WavReader::open(&path) {
+            Ok(r) => Box::new(r.into_samples::<i16>().map_while(|s| s.ok())),
             Err(e) => {
                 log::warn!("Pomijam {}: {e}", path.display());
-                None
+                Box::new(std::iter::empty())
             }
-        })
-        .flat_map(|r| r.into_samples::<i16>().map_while(|s| s.ok()))
+        };
+        if i < last {
+            Box::new(samples.chain(std::iter::repeat(0)).take(full)) as Box<dyn Iterator<Item = i16>>
+        } else {
+            samples
+        }
+    })
 }
 
 /// Ścieżki jako jeden plik WAV (eksport). Kilka ścieżek jest miksowanych próbka po próbce:
@@ -253,8 +262,12 @@ mod tests {
         std::fs::create_dir_all(&d).unwrap();
         d
     }
-    fn rand_suffix() -> u128 {
-        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+    /// Testy biegną równolegle, a zegar macOS ma rozdzielczość mikrosekundy — sam czas potrafi
+    /// dać dwóm testom ten sam katalog, więc dokładamy licznik.
+    fn rand_suffix() -> String {
+        static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        format!("{}-{n}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos())
     }
 
     #[test]
@@ -338,13 +351,33 @@ mod tests {
         mic.append(&[0.25; 3]).unwrap();
         mic.finish().unwrap();
         let mut sys = SegmentedWriter::new(&dir, "system").unwrap();
-        sys.append(&[0.5, 0.75, -0.25, 0.5, 0.5]).unwrap();
+        sys.append(&[0.5, 1.0, -0.25, 0.5, 0.5]).unwrap();
         sys.finish().unwrap();
         let out = dir.join("mix.wav");
         assert_eq!(export_wav(&dir, &["mic", "system"], &out).unwrap(), 5);
         let got: Vec<i16> = hound::WavReader::open(&out).unwrap().into_samples().map(|s| s.unwrap()).collect();
-        // 0.25+0.5, 0.25+0.75 (przycięte), 0.25-0.25, potem sam system.
+        // 0.25+0.5, 0.25+1.0 (przycięte), 0.25-0.25, potem sam system.
         assert_eq!(got, vec![24576, i16::MAX, 0, 16384, 16384]);
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn broken_middle_segment_keeps_later_audio_in_place() {
+        let dir = tmp();
+        std::fs::create_dir_all(&dir).unwrap();
+        // Ucięty środkowy segment (10 próbek zamiast 5 minut), potem zdrowy ostatni.
+        let mut a = hound::WavWriter::create(segment_path(&dir, "mic", 1), spec()).unwrap();
+        (0..10).for_each(|_| a.write_sample(100i16).unwrap());
+        a.finalize().unwrap();
+        let mut b = hound::WavWriter::create(segment_path(&dir, "mic", 2), spec()).unwrap();
+        (0..3).for_each(|_| b.write_sample(7i16).unwrap());
+        b.finalize().unwrap();
+        let full = (SEGMENT_SECONDS * RATE as u64) as usize;
+        let got: Vec<i16> = track_samples(&dir, "mic").collect();
+        assert_eq!(got.len(), full + 3);
+        assert_eq!(&got[..10], &[100; 10]);
+        assert!(got[10..full].iter().all(|&s| s == 0));
+        assert_eq!(&got[full..], &[7; 3]);
         std::fs::remove_dir_all(dir).ok();
     }
 
