@@ -6,6 +6,8 @@ interface Line {
   time: string;
   speaker: string;
   text: string;
+  /** Tłumaczenie na żywo — linia „> …” zaraz pod wypowiedzią. */
+  translation?: string;
 }
 
 const LINE = /^\[(\d{2}:\d{2}:\d{2})\]\s+\*\*(.+?):\*\*\s*(.*)$/;
@@ -28,10 +30,17 @@ function shortTime(t: string): string {
 /** Transkrypt jako lista wypowiedzi (czas, mówca, tekst); nietypowy plik — zwykły Markdown. */
 export default function Transcript({ text }: { text: string }) {
   const rows = text.split("\n");
-  const lines: Line[] = rows.flatMap((r) => {
+  const lines: Line[] = [];
+  for (const r of rows) {
     const m = r.match(LINE);
-    return m ? [{ time: m[1], speaker: m[2], text: m[3] }] : [];
-  });
+    if (m) {
+      lines.push({ time: m[1], speaker: m[2], text: m[3] });
+    } else if (r.startsWith(">") && lines.length) {
+      const last = lines[lines.length - 1];
+      const t = r.replace(/^>\s?/, "").trim();
+      last.translation = last.translation ? `${last.translation} ${t}` : t;
+    }
+  }
   if (lines.length === 0) return <Markdown text={text} />;
   // Linia „Długość: … · Model: … · Mówcy: …” pod tytułem — jako plakietki.
   const meta = rows.find((r) => r.startsWith("Długość:"))?.split(" · ") ?? [];
@@ -54,6 +63,7 @@ export default function Transcript({ text }: { text: string }) {
               <time>{shortTime(l.time)}</time>
               {!continued && <span className={`who${l.speaker === ME ? " me" : ""}`}>{l.speaker}</span>}
               <p>{l.text}</p>
+              {l.translation && <p className="translation">{l.translation}</p>}
             </div>
           );
         })}

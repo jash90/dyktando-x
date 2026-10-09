@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { AlertTriangle, Circle, Download, FileAudio, FileText, FolderOpen, Mic, Pencil, Sparkles, Square, Trash2, Wand2, X } from "lucide-react";
+import { AlertTriangle, Circle, Download, LoaderCircle, FileAudio, FileText, FolderOpen, Mic, Pencil, Sparkles, Square, Trash2, Wand2, X } from "lucide-react";
 import {
   aiApi,
   api,
@@ -229,8 +229,16 @@ function DownloadMenu({
   if (options.length === 0) return null;
   return (
     <div className="menu" ref={root}>
-      <button className="icon" disabled={disabled} aria-haspopup="menu" aria-expanded={open} title="Pobierz nagranie (WAV)" onClick={() => setOpen((o) => !o)}>
-        <Download size={17} />
+      <button
+        className="icon"
+        disabled={disabled}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-busy={!!exporting}
+        title={exporting ? "Zapisywanie nagrania…" : "Pobierz nagranie (WAV)"}
+        onClick={() => setOpen((o) => !o)}
+      >
+        {exporting ? <LoaderCircle size={17} className="spin" /> : <Download size={17} />}
       </button>
       {open && (
         <div className="menu-pop" role="menu">
@@ -246,7 +254,7 @@ function DownloadMenu({
             >
               <Download size={14} />
               <span>
-                {exporting === x.track ? "Zapisywanie…" : x.label}
+                {x.label}
                 <small>{x.title}</small>
               </span>
             </button>

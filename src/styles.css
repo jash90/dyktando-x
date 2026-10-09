@@ -117,7 +117,7 @@ button, select, input, textarea { font: inherit; color: inherit; }
 }
 .brand {
   font-family: var(--font-display);
-  font-variation-settings: "opsz" 48, "SOFT" 50;
+  font-variation-settings: "opsz" 48;
   font-weight: 600;
   font-size: 21px;
   letter-spacing: -0.01em;
@@ -164,7 +164,7 @@ button, select, input, textarea { font: inherit; color: inherit; }
 /* ——— Typografia ——— */
 h1 {
   font-family: var(--font-display);
-  font-variation-settings: "opsz" 72, "SOFT" 30;
+  font-variation-settings: "opsz" 72;
   font-weight: 600;
   font-size: 30px;
   line-height: 1.1;
@@ -532,6 +532,8 @@ button { white-space: nowrap; }
 .utt .who { font-weight: 650; font-size: 12.5px; letter-spacing: 0.01em; color: var(--sp, var(--ink-2)); }
 .utt .who.me { color: var(--accent-ink); }
 .utt p { margin: 0; }
+.utt p.translation { grid-column: 2; color: var(--ink-2); font-family: var(--font-display); font-style: italic; margin-top: 2px; }
+.spin { animation: spin 1s linear infinite; }
 .utt.cont time { visibility: hidden; }
 
 .empty { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 70vh; color: var(--ink-2); text-align: center; max-width: 460px; margin: 0 auto; gap: 10px; }
