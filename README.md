@@ -48,6 +48,14 @@ Tauri 2 + Rust + React/TypeScript.
 - **AI summaries:** Anthropic, OpenAI, OpenRouter, Z.AI. API keys are stored in the system
   credential store, and long meetings are summarized with map-reduce.
 
+## Screenshots
+
+| Meeting summary | Transcript |
+|---|---|
+| ![Meeting with an AI summary](docs/screenshots/meeting-summary.png) | ![Transcript with speakers](docs/screenshots/meeting-transcript.png) |
+| **Dictation history (dark)** | **Settings** |
+| ![Dictation history in the dark theme](docs/screenshots/dictations-dark.png) | ![Dictation settings](docs/screenshots/settings.png) |
+
 ## System requirements
 
 | | Dictation | Application audio in meetings |

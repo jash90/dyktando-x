@@ -22,7 +22,18 @@ export default function Markdown({ text }: { text: string }) {
     const line = raw.trimEnd();
     const bullet = line.match(/^\s*(?:[-*]|\d+\.)\s+(.*)$/);
     if (bullet) {
-      list.push(<li key={i}>{inline(bullet[1])}</li>);
+      // Lista zadań z podsumowania: „- [ ] zrobić…” / „- [x] zrobione”.
+      const task = bullet[1].match(/^\[( |x|X)\]\s+(.*)$/);
+      list.push(
+        task ? (
+          <li key={i} className="task">
+            <span className={`md-check${task[1] === " " ? "" : " done"}`} aria-hidden />
+            {inline(task[2])}
+          </li>
+        ) : (
+          <li key={i}>{inline(bullet[1])}</li>
+        ),
+      );
       return;
     }
     flush();

@@ -116,12 +116,15 @@ export default function DictationsView({ query, onError }: { query: string; onEr
           <h2>{day}</h2>
           {list.map((e) => (
             <article key={e.id} className="dict-entry">
-              <div className="dict-meta">
-                {TIME.format(new Date(e.createdAt))} · {clock(e.durationSeconds)} · {e.engine}
-                {e.pasted ? "" : " · tylko do schowka"}
-                {e.audioDeleted ? " · nagranie usunięte" : ""}
+              <time className="dict-time">{TIME.format(new Date(e.createdAt))}</time>
+              <div className="dict-body">
+                <p className="dict-text">{retranscribing === e.id ? "Przepisywanie…" : e.text}</p>
+                <div className="dict-meta">
+                  {clock(e.durationSeconds)} · {e.engine}
+                  {e.pasted ? "" : " · tylko do schowka"}
+                  {e.audioDeleted ? " · nagranie usunięte" : ""}
+                </div>
               </div>
-              <p className="dict-text">{retranscribing === e.id ? "Przepisywanie…" : e.text}</p>
               <div className="dict-actions">
                 <button className="icon" title="Kopiuj tekst" aria-label="Kopiuj tekst" onClick={() => copy(e)}>
                   <Copy size={15} /> {copied === e.id && <span className="hint">skopiowano</span>}

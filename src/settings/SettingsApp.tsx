@@ -65,7 +65,9 @@ export default function SettingsApp() {
   return (
     <div className="layout">
       <nav className="sidebar">
-        <div className="brand">Dyktando X</div>
+        <div className="brand">
+          Dyktando <em>X</em>
+        </div>
         {PANES.map((p) => (
           <button key={p.id} className={`nav ${pane === p.id ? "active" : ""}`} onClick={() => setPane(p.id)}>
             <p.icon className="nav-icon" size={16} strokeWidth={2} aria-hidden />
