@@ -821,11 +821,13 @@ mod tests {
             let src = &guard.as_ref().unwrap().sources;
             // Podmiana pod jedną blokadą — nadzór nie może zobaczyć chwili bez źródła.
             let fake = SystemCapture::start(Box::new(|_: &[f32]| {})).unwrap();
-            if let Some(old) = src.system.lock().unwrap().replace(fake) {
+            let old = src.system.lock().unwrap().replace(fake);
+            if let Some(old) = old {
                 old.stop();
             }
             let fake = InputCapture::start(None, Box::new(|_: &[f32]| {})).unwrap();
-            if let Some(old) = src.mic.lock().unwrap().replace(fake) {
+            let old = src.mic.lock().unwrap().replace(fake);
+            if let Some(old) = old {
                 old.stop();
             }
         }
