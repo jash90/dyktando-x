@@ -28,6 +28,7 @@ import {
 import Markdown from "../components/Markdown";
 import LanguagePicker, { languageCheck } from "./LanguagePicker";
 import DictationsView from "./DictationsView";
+import Transcript from "./Transcript";
 
 type Tab = "summary" | "transcript";
 
@@ -199,6 +200,63 @@ const EXPORTS: { track: AudioExport; needs: AudioTrack[]; label: string; title: 
   { track: "mixed", needs: ["mic", "system"], label: "Całe nagranie", title: "Pobierz całą rozmowę (Ty i rozmówcy w jednym pliku) jako WAV" },
 ];
 
+/** „Nagranie ▾” — pobranie ścieżki albo całej rozmowy jako WAV. */
+function DownloadMenu({
+  tracks,
+  disabled,
+  exporting,
+  onPick,
+}: {
+  tracks: AudioTrack[];
+  disabled: boolean;
+  exporting: AudioExport | null;
+  onPick: (track: AudioExport) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => !root.current?.contains(e.target as Node) && setOpen(false);
+    const escape = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", escape);
+    };
+  }, [open]);
+  const options = EXPORTS.filter((x) => x.needs.every((t) => tracks.includes(t)));
+  if (options.length === 0) return null;
+  return (
+    <div className="menu" ref={root}>
+      <button className="icon" disabled={disabled} aria-haspopup="menu" aria-expanded={open} title="Pobierz nagranie (WAV)" onClick={() => setOpen((o) => !o)}>
+        <Download size={17} />
+      </button>
+      {open && (
+        <div className="menu-pop" role="menu">
+          {options.map((x) => (
+            <button
+              key={x.track}
+              role="menuitem"
+              disabled={!!exporting}
+              onClick={() => {
+                setOpen(false);
+                onPick(x.track);
+              }}
+            >
+              <Download size={14} />
+              <span>
+                {exporting === x.track ? "Zapisywanie…" : x.label}
+                <small>{x.title}</small>
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Detail({
   detail,
   job,
@@ -301,17 +359,41 @@ function Detail({
             </button>
           </form>
         ) : (
-          <h1>
-            {m.title || `Spotkanie ${shortDate(m.startedAt)}`}
-            <button className="icon" onClick={() => setEditing(true)} title="Zmień nazwę" aria-label="Zmień nazwę">
-              <Pencil size={14} />
-            </button>
-          </h1>
+          <div className="title-row">
+            <h1>
+              {m.title || `Spotkanie ${shortDate(m.startedAt)}`}
+              <button className="icon" onClick={() => setEditing(true)} title="Zmień nazwę" aria-label="Zmień nazwę">
+                <Pencil size={15} />
+              </button>
+            </h1>
+            <div className="title-actions">
+              <DownloadMenu tracks={detail.tracks} disabled={!canExport} exporting={exporting} onPick={exportAudio} />
+              <button className="icon" onClick={() => meetingsApi.reveal(m.id)} title="Pokaż pliki" aria-label="Pokaż pliki">
+                <FolderOpen size={17} />
+              </button>
+              <button
+                className="icon danger"
+                disabled={recording}
+                title="Usuń spotkanie"
+                aria-label="Usuń spotkanie"
+                onClick={() => {
+                  if (confirm("Usunąć to spotkanie razem z nagraniem, transkryptem i podsumowaniami?")) run(() => meetingsApi.remove(m.id));
+                }}
+              >
+                <Trash2 size={17} />
+              </button>
+            </div>
+          </div>
         )}
-        <div className="hint">
-          {shortDate(m.startedAt)} · {clock(m.durationSeconds)} · {m.hasSystemAudio ? "mikrofon + rozmówcy" : "tylko mikrofon"}
-          {m.transcriptEngine ? ` · ${m.transcriptEngine}` : ""}
-          {m.audioDeleted ? " · nagranie usunięte (zostaje tekst)" : ""} · <span className={`state state-${m.state}`}>{STATE_LABELS[m.state]}</span>
+        <div className="meta">
+          <span className="chip mono">{shortDate(m.startedAt)}</span>
+          <span className="chip mono">{clock(m.durationSeconds)}</span>
+          <span className="chip">{m.hasSystemAudio ? "mikrofon + rozmówcy" : "tylko mikrofon"}</span>
+          {m.transcriptEngine && <span className="chip">{m.transcriptEngine}</span>}
+          {m.audioDeleted && <span className="chip">nagranie usunięte, tekst zostaje</span>}
+          <span className="chip">
+            <span className={`state state-${m.state}`}>{STATE_LABELS[m.state]}</span>
+          </span>
         </div>
         {m.lastError && <div className="error">{m.lastError}</div>}
         {m.audioGaps?.length > 0 && (
@@ -325,61 +407,52 @@ function Detail({
         )}
       </header>
 
-      <div className="toolbar">
-        <div className="group">
-          <select value={engine ?? ""} onChange={(e) => setEngine(e.target.value as EngineId)} disabled={!canTranscribe}>
-            {(Object.keys(ENGINE_LABELS) as EngineId[]).map((id) => (
-              <option key={id} value={id}>
-                {ENGINE_LABELS[id]}
-              </option>
-            ))}
-          </select>
-          <LanguagePicker value={languages} languages={allLanguages} disabled={!canTranscribe} onChange={setChosenLanguages} />
-          <button
-            disabled={!canTranscribe || !!languageStatus.error}
-            title={languageStatus.error ?? ""}
-            onClick={() => run(() => meetingsApi.transcribe(m.id, engine ?? undefined, languages))}
-          >
-            <Wand2 size={14} /> {detail.transcript ? "Przepisz ponownie" : "Przepisz"}
-          </button>
-        </div>
-        <div className="group">
-          <select value={provider} onChange={(e) => setProvider(e.target.value)} disabled={!canSummarize}>
-            {providers.map((p) => (
-              <option key={p.id} value={p.id} disabled={!p.has_key}>
-                {p.name}
-                {p.has_key ? "" : " (brak klucza)"}
-              </option>
-            ))}
-          </select>
-          <button
-            disabled={!canSummarize || !providerInfo?.has_key}
-            title={providerInfo?.has_key ? "" : "Dodaj klucz API w Ustawieniach → AI"}
-            onClick={() => providerInfo && run(() => meetingsApi.summarize(m.id, providerInfo.id))}
-          >
-            <Sparkles size={14} /> Podsumuj
-          </button>
-        </div>
-        <div className="group right">
-          {EXPORTS.filter((x) => x.needs.every((t) => detail.tracks.includes(t))).map((x) => (
-            <button key={x.track} disabled={!canExport} title={x.title} onClick={() => exportAudio(x.track)}>
-              <Download size={14} /> {exporting === x.track ? "Zapisywanie…" : x.label}
+      <div className="controls">
+        <div className="control">
+          <div className="control-label">
+            <Wand2 size={12} /> Transkrypcja
+          </div>
+          <div className="control-row">
+            <select value={engine ?? ""} onChange={(e) => setEngine(e.target.value as EngineId)} disabled={!canTranscribe} aria-label="Model">
+              {(Object.keys(ENGINE_LABELS) as EngineId[]).map((id) => (
+                <option key={id} value={id}>
+                  {ENGINE_LABELS[id]}
+                </option>
+              ))}
+            </select>
+            <LanguagePicker value={languages} languages={allLanguages} disabled={!canTranscribe} onChange={setChosenLanguages} />
+            <button
+              className="go primary"
+              disabled={!canTranscribe || !!languageStatus.error}
+              title={languageStatus.error ?? (detail.transcript ? "Przepisz ponownie wybranym modelem i językiem" : "Przepisz nagranie")}
+              onClick={() => run(() => meetingsApi.transcribe(m.id, engine ?? undefined, languages))}
+            >
+              Przepisz
             </button>
-          ))}
-          <button className="icon" onClick={() => meetingsApi.reveal(m.id)} title="Pokaż pliki" aria-label="Pokaż pliki">
-            <FolderOpen size={16} />
-          </button>
-          <button
-            className="icon danger"
-            disabled={recording}
-            title="Usuń spotkanie"
-            aria-label="Usuń spotkanie"
-            onClick={() => {
-              if (confirm("Usunąć to spotkanie razem z nagraniem, transkryptem i podsumowaniami?")) run(() => meetingsApi.remove(m.id));
-            }}
-          >
-            <Trash2 size={16} />
-          </button>
+          </div>
+        </div>
+        <div className="control">
+          <div className="control-label">
+            <Sparkles size={12} /> Podsumowanie AI
+          </div>
+          <div className="control-row">
+            <select value={provider} onChange={(e) => setProvider(e.target.value)} disabled={!canSummarize} aria-label="Dostawca AI">
+              {providers.map((p) => (
+                <option key={p.id} value={p.id} disabled={!p.has_key}>
+                  {p.name}
+                  {p.has_key ? "" : " (brak klucza)"}
+                </option>
+              ))}
+            </select>
+            <button
+              className="go primary"
+              disabled={!canSummarize || !providerInfo?.has_key}
+              title={providerInfo?.has_key ? "" : "Dodaj klucz API w Ustawieniach → AI"}
+              onClick={() => providerInfo && run(() => meetingsApi.summarize(m.id, providerInfo.id))}
+            >
+              Podsumuj
+            </button>
+          </div>
         </div>
       </div>
 
@@ -439,7 +512,7 @@ function Detail({
           (live ? (
             <LiveTranscript items={live.items} drafts={live.drafts} error={live.error} />
           ) : detail.transcript ? (
-            <Markdown text={detail.transcript} />
+            <Transcript text={detail.transcript} />
           ) : (
             <p className="hint">{recording ? "Trwa nagrywanie…" : "Brak transkryptu. Kliknij „Przepisz”."}</p>
           ))}

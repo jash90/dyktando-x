@@ -80,13 +80,13 @@ export default function LanguagePicker({
         disabled={disabled}
         aria-haspopup="listbox"
         aria-expanded={open}
-        title="Języki rozmowy — przy słabej transkrypcji wskaż je i przepisz ponownie"
+        title={`Języki rozmowy: ${languagesLabel(value, languages)} — przy słabej transkrypcji wskaż je i przepisz ponownie`}
         onClick={() => {
           setQuery("");
           setOpen((o) => !o);
         }}
       >
-        <Languages size={14} /> {languagesLabel(value, languages)} <ChevronDown size={12} />
+        <Languages size={14} /> <span className="label">{languagesLabel(value, languages)}</span> <ChevronDown size={12} />
       </button>
       {open && (
         <div className="lang-pop">
