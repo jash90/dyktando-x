@@ -128,7 +128,7 @@ struct ModelInfo {
     downloading: bool,
 }
 
-fn asset_key(id: AssetId) -> String {
+pub(crate) fn asset_key(id: AssetId) -> String {
     serde_json::to_string(&id).unwrap_or_default()
 }
 

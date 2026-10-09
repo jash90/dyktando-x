@@ -23,10 +23,12 @@ fn plain(text: &str) -> String {
     text.to_lowercase().split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect::<Vec<_>>().join(" ")
 }
 
-/// Na dźwięku bez słów Whisper potrafi „przeczytać” samą podpowiedź (albo jej kawałek).
+/// Na dźwięku bez słów Whisper potrafi „przeczytać” samą podpowiedź (albo jej kawałek). Jedno
+/// słowo zostawiamy — to częściej prawdziwe zawołanie po imieniu („Borys?”) niż echo; całe
+/// słowa porównujemy, więc „ci” nie pasuje do „CI/CD”, a „se” do „Hisense”.
 fn is_prompt_echo(text: &str, prompt: &str) -> bool {
     let t = plain(text);
-    !t.is_empty() && plain(prompt).contains(&t)
+    t.contains(' ') && format!(" {} ", plain(prompt)).contains(&format!(" {t} "))
 }
 
 /// Wątki dla rozpoznania języka (whisper.cpp przy dekodowaniu sam bierze min(4, rdzenie)).
@@ -108,5 +110,10 @@ mod tests {
         assert!(is_prompt_echo(" Hisense, Tizen", prompt));
         assert!(!is_prompt_echo("Wczoraj na Hisense coś tam patrzyłem", prompt));
         assert!(!is_prompt_echo("...", prompt));
+        // Jedno słowo (nawet ze słownika) to prawdziwa wypowiedź.
+        assert!(!is_prompt_echo("Klaudiusz?", prompt));
+        assert!(!is_prompt_echo("Ci", prompt));
+        // Tylko całe słowa: „sense tizen” to nie kawałek „Hisense, Tizen”.
+        assert!(!is_prompt_echo("sense Tizen", prompt));
     }
 }
