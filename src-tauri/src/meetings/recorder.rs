@@ -155,6 +155,22 @@ impl Track {
         }
     }
 
+    /// Dopełnia ścieżkę ciszą do długości nagrania. Gdy brakuje dużo, źródło urwało się
+    /// i już nie wróciło — to też przerwa (najgorsza: aż do końca).
+    fn pad_to(&mut self, expected: u64) {
+        let Some(w) = self.writer.as_mut() else { return };
+        let have = w.samples_written();
+        if expected <= have {
+            return;
+        }
+        if self.report_gaps && have > 0 && expected > have + GAP_TOLERANCE {
+            let (start, len) = (have as f64 / RATE as f64, (expected - have) as f64 / RATE as f64);
+            log::warn!("Brak dźwięku do końca nagrania ({}): {len:.1} s od {start:.1} s", self.name);
+            self.gaps.push((start, len));
+        }
+        let _ = w.append_silence(expected - have);
+    }
+
     fn finish(&mut self) -> Result<u64> {
         if let Some(r) = self.resampler.as_mut() {
             let tail = r.flush();
@@ -314,18 +330,31 @@ impl Watch {
     }
 }
 
+/// Powód odtworzenia źródła.
+struct Problem {
+    why: &'static str,
+    /// Dźwięk płynął i się urwał (ostrzeżenie w oknie nagrywania). Źródło, które jeszcze nic nie
+    /// dało (macOS czeka na zgodę), nie jest „urwane”.
+    dropout: bool,
+}
+
 /// Dlaczego źródło trzeba utworzyć od nowa (`None` = działa).
-fn system_problem(src: &Sources, watch: &Watch, now_ms: u64) -> Option<&'static str> {
+fn system_problem(src: &Sources, watch: &Watch, now_ms: u64) -> Option<Problem> {
     let guard = src.system.lock().unwrap();
-    let Some(c) = guard.as_ref() else { return Some("przechwytywanie nie działa") };
+    let Some(c) = guard.as_ref() else { return Some(Problem { why: "przechwytywanie nie działa", dropout: true }) };
+    // Gdzie cisza = brak buforów (Windows), brak dostaw niczego nie mówi.
+    if !system::DELIVERS_IN_SILENCE {
+        return None;
+    }
     if c.buffers_received() == 0 {
         // Tap utworzony przed zgodą użytkownika nie oddaje nic (macOS).
-        return (now_ms.saturating_sub(watch.since_ms) > 4_000).then_some("nie oddaje dźwięku");
+        let waited = now_ms.saturating_sub(watch.since_ms) > 4_000;
+        return waited.then_some(Problem { why: "nie oddaje dźwięku", dropout: false });
     }
-    if system::DELIVERS_IN_SILENCE && watch.idle_ms(&src.sys_flow, now_ms) > STALL_MS {
-        return Some("dostawy ustały");
+    if watch.idle_ms(&src.sys_flow, now_ms) > STALL_MS {
+        return Some(Problem { why: "dostawy ustały", dropout: true });
     }
-    c.device_changed().then_some("zmieniło się wyjście dźwięku")
+    c.device_changed().then_some(Problem { why: "zmieniło się wyjście dźwięku", dropout: true })
 }
 
 fn mic_problem(src: &Sources, watch: &Watch, now_ms: u64, check_default: bool) -> Option<&'static str> {
@@ -358,11 +387,13 @@ fn supervise(src: Arc<Sources>, system_wanted: bool, stop: Arc<AtomicBool>) {
 
         if system_wanted {
             match system_problem(&src, &sys, now) {
-                Some(why) if sys.may_retry(now) => {
+                Some(Problem { why, dropout }) if sys.may_retry(now) => {
                     sys.retries += 1;
                     sys.last_try_ms = now;
                     log::warn!("Dźwięk rozmówców: {why} — tworzę przechwytywanie od nowa (próba {})", sys.retries);
-                    src.warnings.lock().unwrap().system_lost = true;
+                    if dropout {
+                        src.warnings.lock().unwrap().system_lost = true;
+                    }
                     src.stop_system();
                     match src.start_system() {
                         Ok(()) => sys.since_ms = src.now_ms(),
@@ -424,7 +455,8 @@ fn write_loop(rx: mpsc::Receiver<Msg>, started: Instant, mic_track: Arc<Mutex<Tr
         if lag > 2.0 && !lagging {
             log::warn!("Zapis nagrania nie nadąża (opóźnienie {lag:.1} s) — dźwięk czeka w pamięci");
         }
-        lagging = lag > 0.5;
+        // Ostrzegamy po przekroczeniu 2 s, ponownie dopiero po zejściu poniżej 0,5 s.
+        lagging = if lagging { lag > 0.5 } else { lag > 2.0 };
         let track = if kind == transcript::Track::Mic { &mic_track } else { &sys_track };
         track.lock().unwrap().push(at, &samples);
     }
@@ -596,12 +628,7 @@ impl Recorder {
         let mut gaps = Vec::new();
         for (track, kind) in [(&src.mic_track, transcript::Track::Mic), (&src.sys_track, transcript::Track::System)] {
             let mut t = track.lock().unwrap();
-            if let Some(w) = t.writer.as_mut() {
-                let have = w.samples_written();
-                if expected > have {
-                    let _ = w.append_silence(expected - have);
-                }
-            }
+            t.pad_to(expected);
             if let Err(e) = t.finish() {
                 errors.push(e.to_string());
             }
@@ -682,6 +709,23 @@ mod tests {
         // Ścieżka dalej trzyma się zegara nagrania.
         let written = t.writer.as_ref().unwrap().samples_written() as f64 / RATE as f64;
         assert!((written - 8.0).abs() < 0.1, "{written}");
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn a_source_that_never_came_back_is_a_gap_until_the_end() {
+        let dir = tmp();
+        let mut t = track(&dir, true);
+        feed_track(&mut t, 0.0, 2.0);
+        t.pad_to(10 * RATE as u64);
+        assert_eq!(t.gaps.len(), 1);
+        let (start, len) = t.gaps[0];
+        assert!((start - 2.0).abs() < 0.1 && (len - 8.0).abs() < 0.1, "{start} {len}");
+        // Zwykła końcówka (ostatnie bufory w drodze) to nie przerwa.
+        let mut t = track(&dir, true);
+        feed_track(&mut t, 0.0, 2.0);
+        t.pad_to(2 * RATE as u64 + RATE as u64 / 10);
+        assert!(t.gaps.is_empty());
         std::fs::remove_dir_all(dir).ok();
     }
 
@@ -785,6 +829,7 @@ mod tests {
         println!("ostrzeżenie po odtworzeniu: {:?}", status.warning);
         let m = rec.stop(&store).unwrap();
         let _ = say.kill();
+        let _ = say.wait();
         println!("{:?}", m.audio_gaps);
         let mic_gap = m.audio_gaps.iter().find(|g| g.track == transcript::Track::Mic).expect("przerwa mikrofonu");
         let sys_gap = m.audio_gaps.iter().find(|g| g.track == transcript::Track::System).expect("przerwa rozmówców");
