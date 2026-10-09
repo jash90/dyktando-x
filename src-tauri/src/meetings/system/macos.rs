@@ -116,6 +116,8 @@ pub struct Capture {
     proc_id: AudioDeviceIOProcID,
     _block: Option<IoBlock>,
     _queue: Option<DispatchRetained<DispatchQueue>>,
+    /// Wyjście, na którym tap był założony (urządzenie zbiorcze bierze z niego takt).
+    output: String,
 }
 
 // Identyfikatory Core Audio i blok są bezpieczne do przeniesienia między wątkami.
@@ -123,7 +125,7 @@ unsafe impl Send for Capture {}
 
 impl Capture {
     pub fn start(sink: Sink) -> Result<(Self, u32)> {
-        let mut c = Capture { tap: kAudioObjectUnknown, aggregate: kAudioObjectUnknown, proc_id: None, _block: None, _queue: None };
+        let mut c = Capture { tap: kAudioObjectUnknown, aggregate: kAudioObjectUnknown, proc_id: None, _block: None, _queue: None, output: String::new() };
         match unsafe { c.start_tap(sink) } {
             Ok(rate) => Ok((c, rate)),
             Err(e) => {
@@ -156,6 +158,7 @@ impl Capture {
         }
 
         let output = default_output_uid()?;
+        self.output = output.clone();
         let sub_device = dict(&[(kAudioSubDeviceUIDKey, obj(NSString::from_str(&output)))]);
         let sub_tap = dict(&[
             (kAudioSubTapDriftCompensationKey, obj(NSNumber::new_bool(true))),
@@ -248,6 +251,12 @@ impl Capture {
 
     pub fn stop(mut self) {
         self.teardown();
+    }
+
+    /// Domyślne wyjście jest już inne niż to, na którym założono tap (np. podłączone
+    /// słuchawki Bluetooth). Urządzenie zbiorcze zostaje przy starym — dźwięk potrafi zamilknąć.
+    pub fn device_changed(&self) -> bool {
+        default_output_uid().is_ok_and(|uid| uid != self.output)
     }
 }
 

@@ -1,5 +1,5 @@
 import type { PaneProps } from "./SettingsApp";
-import { ENGINE_LABELS, meetingsApi, TRANSLATION_TARGETS, type EngineId, type Language } from "../api";
+import { api, ENGINE_LABELS, meetingsApi, TRANSLATION_TARGETS, type EngineId, type Language } from "../api";
 import ShortcutRecorder from "../components/ShortcutRecorder";
 
 export default function MeetingsPane({ settings, update, env }: PaneProps) {
@@ -127,6 +127,11 @@ export default function MeetingsPane({ settings, update, env }: PaneProps) {
       {env.os === "linux" && (
         <p className="hint">Dźwięk aplikacji nagrywany jest z monitora domyślnego wyjścia (PulseAudio/PipeWire, program parec z pakietu pulseaudio-utils).</p>
       )}
+      <div className="row">
+        <label>Diagnostyka</label>
+        <button onClick={() => api.revealLogs()}>Pokaż logi</button>
+        <p className="hint">Gdy w nagraniu brakuje fragmentu, w logu jest zapisane, kiedy i dlaczego dźwięk się urwał.</p>
+      </div>
     </section>
   );
 }

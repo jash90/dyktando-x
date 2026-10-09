@@ -293,6 +293,15 @@ function Detail({
           {m.audioDeleted ? " · nagranie usunięte (zostaje tekst)" : ""} · <span className={`state state-${m.state}`}>{STATE_LABELS[m.state]}</span>
         </div>
         {m.lastError && <div className="error">{m.lastError}</div>}
+        {m.audioGaps?.length > 0 && (
+          <div className="error">
+            Przerwy w nagraniu (dźwięk się urwał i był wznawiany):{" "}
+            {m.audioGaps.map((g) => `${g.track === "mic" ? "mikrofon" : "rozmówcy"} ${clock(g.start)} (${Math.round(g.seconds)} s)`).join(", ")}.{" "}
+            <button className="link" onClick={() => api.revealLogs()}>
+              Pokaż logi
+            </button>
+          </div>
+        )}
       </header>
 
       <div className="toolbar">

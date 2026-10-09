@@ -49,10 +49,19 @@ impl SystemCapture {
         self.buffers.load(Ordering::Relaxed)
     }
 
+    /// Zmieniło się urządzenie, na którym stoi przechwytywanie — trzeba je utworzyć od nowa.
+    pub fn device_changed(&self) -> bool {
+        self.inner.device_changed()
+    }
+
     pub fn stop(self) {
         self.inner.stop();
     }
 }
+
+/// Czy przechwytywanie oddaje bufory także w ciszy. WASAPI loopback w ciszy nie wysyła nic,
+/// więc tam brak buforów nie znaczy, że dźwięk się urwał.
+pub const DELIVERS_IN_SILENCE: bool = cfg!(not(target_os = "windows"));
 
 /// Czy system w ogóle obsługuje nagrywanie dźwięku aplikacji (np. macOS < 14.4 — nie).
 pub fn availability() -> Result<(), String> {

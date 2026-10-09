@@ -65,6 +65,12 @@ impl Capture {
         Ok((Self { child: Some(child), thread: Some(thread) }, RATE))
     }
 
+    /// `parec` zostaje przy monitorze wybranym na starcie; gdy się zamknie (urządzenie
+    /// zniknęło), dostawy ustają i nadzór nagrania tworzy przechwytywanie od nowa.
+    pub fn device_changed(&self) -> bool {
+        false
+    }
+
     pub fn stop(mut self) {
         self.shutdown();
     }

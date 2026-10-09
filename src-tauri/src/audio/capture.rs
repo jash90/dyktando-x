@@ -4,7 +4,8 @@
 use anyhow::{anyhow, Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, SampleFormat, SizedSample};
-use std::sync::mpsc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc};
 use std::thread::JoinHandle;
 
 use super::resample::downmix;
@@ -44,6 +45,8 @@ pub struct InputCapture {
     thread: Option<JoinHandle<()>>,
     pub sample_rate: u32,
     pub device_name: String,
+    /// Strumień zgłosił błąd (np. urządzenie odłączone) — dalej nic nie przyjdzie.
+    failed: Arc<AtomicBool>,
 }
 
 impl InputCapture {
@@ -51,6 +54,8 @@ impl InputCapture {
         let device = device.map(str::to_string);
         let (ready_tx, ready_rx) = mpsc::channel::<Result<(u32, String)>>();
         let (stop_tx, stop_rx) = mpsc::channel::<()>();
+        let failed = Arc::new(AtomicBool::new(false));
+        let on_error = failed.clone();
         let thread = std::thread::Builder::new()
             .name("mic-capture".into())
             .spawn(move || {
@@ -58,7 +63,7 @@ impl InputCapture {
                     let dev = find_device(device.as_deref())?;
                     let name = dev.to_string();
                     let cfg = dev.default_input_config().context("konfiguracja mikrofonu")?;
-                    let stream = build(&dev, cfg.sample_format(), cfg.config(), sink)?;
+                    let stream = build(&dev, cfg.sample_format(), cfg.config(), sink, on_error)?;
                     stream.play().context("start mikrofonu")?;
                     Ok((stream, cfg.sample_rate(), name))
                 })();
@@ -76,11 +81,15 @@ impl InputCapture {
         let (sample_rate, device_name) = ready_rx
             .recv()
             .map_err(|_| anyhow!("wątek mikrofonu zakończył się"))??;
-        Ok(Self { stop: Some(stop_tx), thread: Some(thread), sample_rate, device_name })
+        Ok(Self { stop: Some(stop_tx), thread: Some(thread), sample_rate, device_name, failed })
     }
 
     pub fn stop(mut self) {
         self.shutdown();
+    }
+
+    pub fn failed(&self) -> bool {
+        self.failed.load(Ordering::Relaxed)
     }
 
     fn shutdown(&mut self) {
@@ -99,20 +108,20 @@ impl Drop for InputCapture {
     }
 }
 
-fn build(dev: &cpal::Device, format: SampleFormat, config: cpal::StreamConfig, sink: Sink) -> Result<cpal::Stream> {
+fn build(dev: &cpal::Device, format: SampleFormat, config: cpal::StreamConfig, sink: Sink, failed: Arc<AtomicBool>) -> Result<cpal::Stream> {
     match format {
-        SampleFormat::F32 => typed::<f32>(dev, config, sink),
-        SampleFormat::I16 => typed::<i16>(dev, config, sink),
-        SampleFormat::I32 => typed::<i32>(dev, config, sink),
-        SampleFormat::U16 => typed::<u16>(dev, config, sink),
-        SampleFormat::I8 => typed::<i8>(dev, config, sink),
-        SampleFormat::U8 => typed::<u8>(dev, config, sink),
-        SampleFormat::F64 => typed::<f64>(dev, config, sink),
+        SampleFormat::F32 => typed::<f32>(dev, config, sink, failed),
+        SampleFormat::I16 => typed::<i16>(dev, config, sink, failed),
+        SampleFormat::I32 => typed::<i32>(dev, config, sink, failed),
+        SampleFormat::U16 => typed::<u16>(dev, config, sink, failed),
+        SampleFormat::I8 => typed::<i8>(dev, config, sink, failed),
+        SampleFormat::U8 => typed::<u8>(dev, config, sink, failed),
+        SampleFormat::F64 => typed::<f64>(dev, config, sink, failed),
         other => Err(anyhow!("Nieobsługiwany format próbek mikrofonu: {other:?}")),
     }
 }
 
-fn typed<T>(dev: &cpal::Device, config: cpal::StreamConfig, mut sink: Sink) -> Result<cpal::Stream>
+fn typed<T>(dev: &cpal::Device, config: cpal::StreamConfig, mut sink: Sink, failed: Arc<AtomicBool>) -> Result<cpal::Stream>
 where
     T: SizedSample,
     f32: FromSample<T>,
@@ -131,7 +140,10 @@ where
                     sink(&scratch);
                 }
             },
-            |e| log::error!("strumień mikrofonu: {e}"),
+            move |e| {
+                log::error!("strumień mikrofonu: {e}");
+                failed.store(true, Ordering::Relaxed);
+            },
             None,
         )
         .context("otwieranie mikrofonu")?;
