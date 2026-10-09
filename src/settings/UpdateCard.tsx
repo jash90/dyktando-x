@@ -30,8 +30,12 @@ export default function UpdateCard() {
       const p = e.payload;
       setStatus((s) => (s.kind === "installing" && !p.finished ? { ...s, done: p.done, total: p.total } : s));
     });
+    const unFailed = listen<string>("update-check-failed", (e) => {
+      setStatus((s) => (s.kind === "installing" ? s : { kind: "error", message: `Nie udało się sprawdzić aktualizacji: ${e.payload}` }));
+    });
     return () => {
       unStatus.then((f) => f());
+      unFailed.then((f) => f());
       unProgress.then((f) => f());
     };
   }, []);

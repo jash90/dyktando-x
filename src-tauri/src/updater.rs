@@ -144,6 +144,8 @@ pub fn open_from_tray(app: &AppHandle) {
         tauri::async_runtime::spawn(async move {
             if let Err(e) = check(&app).await {
                 log::info!("Sprawdzanie aktualizacji: {e}");
+                // Panel System jest już otwarty — pokaże błąd zamiast milczeć.
+                let _ = app.emit("update-check-failed", e);
             }
         });
     }
