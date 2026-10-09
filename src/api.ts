@@ -76,6 +76,8 @@ export type HudState =
 export const api = {
   getSettings: () => invoke<Settings>("get_settings"),
   languages: () => invoke<LanguageInfo[]>("list_languages"),
+  /** Pokazuje plik logu aplikacji w menedżerze plików. */
+  revealLogs: () => invoke<void>("reveal_logs"),
   saveSettings: (settings: Settings) => invoke<string[]>("save_settings", { settings }),
   listInputDevices: () => invoke<{ devices: string[]; default: string | null }>("list_input_devices"),
   listModels: () => invoke<ModelInfo[]>("list_models"),
@@ -145,6 +147,15 @@ export interface Meeting {
   /** Języki ostatniej transkrypcji (puste = rozpoznane przez model); `null` = sprzed tej opcji. */
   transcriptLanguages: string[] | null;
   lastError: string | null;
+  /** Przerwy w nagraniu: dźwięk ścieżki się urwał i był wznawiany. */
+  audioGaps: AudioGap[];
+}
+
+export interface AudioGap {
+  track: AudioTrack;
+  /** Sekundy od startu nagrania. */
+  start: number;
+  seconds: number;
 }
 
 export interface LanguageInfo {

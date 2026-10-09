@@ -22,6 +22,16 @@ pub fn meetings() -> PathBuf {
     support().join("Meetings")
 }
 
+/// Logi: macOS `~/Library/Logs/Dyktando X`, gdzie indziej `<dane>/logs`.
+pub fn logs() -> PathBuf {
+    if std::env::var_os("DYKTANDO_X_HOME").is_none() && cfg!(target_os = "macos") {
+        if let Some(home) = dirs::home_dir() {
+            return home.join("Library/Logs/Dyktando X");
+        }
+    }
+    support().join("logs")
+}
+
 pub fn settings_file() -> PathBuf {
     support().join("settings.json")
 }

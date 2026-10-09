@@ -26,6 +26,15 @@ pub enum State {
     Failed,
 }
 
+/// Przerwa w nagraniu ścieżki (źródło przestało dawać dźwięk), w sekundach od startu.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioGap {
+    pub track: crate::meetings::transcript::Track,
+    pub start: f64,
+    pub seconds: f64,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Meeting {
@@ -47,6 +56,9 @@ pub struct Meeting {
     /// Języki ostatniej transkrypcji (puste = rozpoznane przez silnik); `None` = sprzed tej opcji.
     #[serde(default)]
     pub transcript_languages: Option<Vec<String>>,
+    /// Przerwy w nagraniu (dźwięk się urwał i trzeba było go wznowić).
+    #[serde(default)]
+    pub audio_gaps: Vec<AudioGap>,
     #[serde(default)]
     pub last_error: Option<String>,
 }
@@ -118,6 +130,7 @@ impl Store {
             audio_deleted: false,
             transcript_engine: None,
             transcript_languages: None,
+            audio_gaps: Vec::new(),
             last_error: None,
         };
         self.save(&m)?;

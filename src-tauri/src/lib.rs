@@ -8,6 +8,7 @@ mod focus;
 mod hotkeys;
 mod hud;
 mod languages;
+mod logging;
 mod live_window;
 mod meetings;
 mod models;
@@ -377,7 +378,7 @@ fn autostart_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let _ = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info,ort=warn,whisper_rs=warn,transcribe_rs=warn")).try_init();
+    logging::init();
     let settings = Settings::load();
     tauri::Builder::default()
         // Ponowne uruchomienie (dwuklik w Finderze / menu Start) otwiera ustawienia działającej kopii.
@@ -430,6 +431,7 @@ pub fn run() {
             commands::import_meeting,
             commands::transcribe_meeting,
             languages::list_languages,
+            logging::reveal_logs,
             commands::summarize_meeting,
             commands::cancel_job,
             commands::job_status,

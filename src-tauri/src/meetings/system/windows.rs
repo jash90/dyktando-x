@@ -40,6 +40,11 @@ impl Capture {
         }
     }
 
+    /// Process loopback nie jest przypięty do konkretnego wyjścia — nie ma czego pilnować.
+    pub fn device_changed(&self) -> bool {
+        false
+    }
+
     pub fn stop(mut self) {
         self.shutdown();
     }
