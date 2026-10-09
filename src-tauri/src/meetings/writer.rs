@@ -289,12 +289,16 @@ mod tests {
     }
 
     #[test]
-    fn export_of_missing_track_leaves_no_file() {
+    fn failed_export_leaves_no_part_file() {
         let dir = tmp();
-        std::fs::create_dir_all(&dir).unwrap();
-        let out = dir.join("none.wav");
-        export_wav(&dir.join("brak"), "mic", &out).ok();
-        assert!(!dir.join("none.wav.part").exists());
+        let mut w = SegmentedWriter::new(&dir, "mic").unwrap();
+        w.append(&[0.1; 100]).unwrap();
+        w.finish().unwrap();
+        // Cel zajęty przez katalog: zapis do `.part` się udaje, rename już nie.
+        let out = dir.join("taken.wav");
+        std::fs::create_dir_all(&out).unwrap();
+        assert!(export_wav(&dir, "mic", &out).is_err());
+        assert!(!dir.join("taken.wav.part").exists());
         std::fs::remove_dir_all(dir).ok();
     }
 
