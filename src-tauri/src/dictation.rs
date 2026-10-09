@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::audio::{self, capture::InputCapture, resample};
+use crate::dictations;
 use crate::engine::Engine;
 use crate::models::EngineId;
 use crate::paste;
@@ -158,12 +159,31 @@ impl Dictation {
 
         let app = app.clone();
         let engine = self.engine.clone();
+        let created_at = chrono::Local::now();
         std::thread::spawn(move || {
             let result = transcribe_and_insert(&engine, &samples, rate, &settings);
             let state = app.state::<AppState>();
             *state.dictation.phase.lock().unwrap() = Phase::Idle;
             match result {
-                Ok(Some((text, outcome))) => emit(&app, HudState::Done { text, pasted: outcome == paste::Outcome::Pasted }),
+                Ok(Some(done)) => {
+                    let pasted = done.outcome == paste::Outcome::Pasted;
+                    emit(&app, HudState::Done { text: done.text.clone(), pasted });
+                    // Po wklejeniu — zapis w historii nie opóźnia wstawienia tekstu.
+                    if settings.dictation_history {
+                        let entry = dictations::Entry {
+                            id: dictations::new_id(created_at),
+                            created_at,
+                            duration_seconds: done.audio16.len() as f64 / 16_000.0,
+                            text: done.text,
+                            raw: done.raw,
+                            engine: settings.engine.asset().title.to_string(),
+                            languages: settings.language.code().map(String::from).into_iter().collect(),
+                            pasted,
+                            audio_deleted: false,
+                        };
+                        dictations::record(&app, &entry, &done.audio16);
+                    }
+                }
                 Ok(None) => emit(&app, HudState::Idle),
                 Err(e) => emit(&app, HudState::Error { message: e.to_string() }),
             }
@@ -171,12 +191,20 @@ impl Dictation {
     }
 }
 
+/// Przepisane i wstawione dyktowanie (z nagraniem 16 kHz — do historii).
+struct Done {
+    text: String,
+    raw: String,
+    outcome: paste::Outcome,
+    audio16: Vec<f32>,
+}
+
 fn transcribe_and_insert(
     engine: &Mutex<Option<(EngineId, Engine)>>,
     samples: &[f32],
     rate: u32,
     settings: &Settings,
-) -> Result<Option<(String, paste::Outcome)>> {
+) -> Result<Option<Done>> {
     if audio::is_digital_silence(samples) {
         return Err(anyhow!(
             "Mikrofon nagrał cyfrową ciszę — system nie dał dostępu do mikrofonu. Sprawdź uprawnienia w ustawieniach prywatności."
@@ -209,5 +237,5 @@ fn transcribe_and_insert(
         PasteMode::Auto => crate::focus::should_paste(),
     };
     let outcome = paste::insert(&text, should_paste)?;
-    Ok(Some((text, outcome)))
+    Ok(Some(Done { text, raw, outcome, audio16 }))
 }

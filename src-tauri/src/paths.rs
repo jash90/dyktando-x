@@ -22,6 +22,10 @@ pub fn meetings() -> PathBuf {
     support().join("Meetings")
 }
 
+pub fn dictations() -> PathBuf {
+    support().join("Dictations")
+}
+
 /// Logi: macOS `~/Library/Logs/Dyktando X`, gdzie indziej `<dane>/logs`.
 pub fn logs() -> PathBuf {
     if std::env::var_os("DYKTANDO_X_HOME").is_none() && cfg!(target_os = "macos") {

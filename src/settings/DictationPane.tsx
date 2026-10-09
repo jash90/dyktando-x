@@ -72,6 +72,10 @@ export default function DictationPane({ settings, update }: PaneProps) {
           <input type="checkbox" checked={settings.hud_enabled} onChange={(e) => update({ hud_enabled: e.target.checked })} />
           Pokazuj dymek ze stanem nagrywania
         </label>
+        <label>
+          <input type="checkbox" checked={settings.dictation_history} onChange={(e) => update({ dictation_history: e.target.checked })} />
+          Zapisuj historię dyktowania (tekst i nagranie, tylko na tym komputerze) — w oknie Spotkania → Dyktowania
+        </label>
         <AutostartToggle />
       </div>
       <h2>Polecenia w trakcie dyktowania</h2>

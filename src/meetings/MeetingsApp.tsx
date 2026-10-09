@@ -27,6 +27,7 @@ import {
 } from "../api";
 import Markdown from "../components/Markdown";
 import LanguagePicker, { languageCheck } from "./LanguagePicker";
+import DictationsView from "./DictationsView";
 
 type Tab = "summary" | "transcript";
 
@@ -37,6 +38,8 @@ export default function MeetingsApp() {
   const [status, setStatus] = useState<RecordingStatus | null>(null);
   const [job, setJob] = useState<JobEvent | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [view, setView] = useState<"meetings" | "dictations">("meetings");
+  const [query, setQuery] = useState("");
   const [live, setLive] = useState<Utterance[]>([]);
   const [drafts, setDrafts] = useState<LiveDrafts>({});
   const [liveError, setLiveError] = useState<string | null>(null);
@@ -120,27 +123,43 @@ export default function MeetingsApp() {
   return (
     <div className="layout meetings">
       <nav className="sidebar meeting-list">
-        <div className="brand">Spotkania</div>
-        <button className={`record ${status?.recording ? "on" : ""}`} onClick={toggleRecording}>
-          {status?.recording ? <Square size={14} fill="currentColor" /> : <Circle size={14} fill="currentColor" />}
-          {status?.recording ? `Zatrzymaj · ${clock(status.seconds)}` : "Nagraj spotkanie"}
-        </button>
-        <button className="import" onClick={importFile} title="Plik z nagraniem rozmowy (MP3, M4A, WAV, FLAC, OGG, Opus…) — zostanie przepisany jak spotkanie">
-          <FileAudio size={14} /> Importuj nagranie
-        </button>
-        {status?.recording && status.warning && <div className="hint warn-text">{status.warning}</div>}
-        <div className="list">
-          {meetings.length === 0 && <div className="hint">Brak nagrań. Kliknij „Nagraj spotkanie”, użyj skrótu z ustawień albo zaimportuj plik z nagraniem.</div>}
-          {meetings.map((m) => (
-            <button key={m.id} className={`item ${selected === m.id ? "active" : ""}`} onClick={() => setSelected(m.id)}>
-              <span className="item-title">{m.title || shortDate(m.startedAt)}</span>
-              <span className="item-meta">
-                {m.title ? `${shortDate(m.startedAt)} · ` : ""}
-                {clock(m.durationSeconds)} · <span className={`state state-${m.state}`}>{STATE_LABELS[m.state]}</span>
-              </span>
-            </button>
-          ))}
+        <div className="view-switch" role="tablist">
+          <button role="tab" aria-selected={view === "meetings"} className={view === "meetings" ? "on" : ""} onClick={() => setView("meetings")}>
+            Spotkania
+          </button>
+          <button role="tab" aria-selected={view === "dictations"} className={view === "dictations" ? "on" : ""} onClick={() => setView("dictations")}>
+            Dyktowania
+          </button>
         </div>
+        {view === "dictations" ? (
+          <>
+            <input className="search" placeholder="Szukaj w dyktowaniach…" value={query} onChange={(e) => setQuery(e.target.value)} />
+            <div className="hint">Każde dyktowanie trafia tutaj (tekst i nagranie). Można to wyłączyć w Ustawieniach → Dyktowanie.</div>
+          </>
+        ) : (
+          <>
+            <button className={`record ${status?.recording ? "on" : ""}`} onClick={toggleRecording}>
+              {status?.recording ? <Square size={14} fill="currentColor" /> : <Circle size={14} fill="currentColor" />}
+              {status?.recording ? `Zatrzymaj · ${clock(status.seconds)}` : "Nagraj spotkanie"}
+            </button>
+            <button className="import" onClick={importFile} title="Plik z nagraniem rozmowy (MP3, M4A, WAV, FLAC, OGG, Opus…) — zostanie przepisany jak spotkanie">
+              <FileAudio size={14} /> Importuj nagranie
+            </button>
+            {status?.recording && status.warning && <div className="hint warn-text">{status.warning}</div>}
+            <div className="list">
+              {meetings.length === 0 && <div className="hint">Brak nagrań. Kliknij „Nagraj spotkanie”, użyj skrótu z ustawień albo zaimportuj plik z nagraniem.</div>}
+              {meetings.map((m) => (
+                <button key={m.id} className={`item ${selected === m.id ? "active" : ""}`} onClick={() => setSelected(m.id)}>
+                  <span className="item-title">{m.title || shortDate(m.startedAt)}</span>
+                  <span className="item-meta">
+                    {m.title ? `${shortDate(m.startedAt)} · ` : ""}
+                    {clock(m.durationSeconds)} · <span className={`state state-${m.state}`}>{STATE_LABELS[m.state]}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </>
+        )}
       </nav>
       <main className="content">
         {error && (
@@ -151,7 +170,9 @@ export default function MeetingsApp() {
             </button>
           </div>
         )}
-        {detail ? (
+        {view === "dictations" ? (
+          <DictationsView query={query} onError={setError} />
+        ) : detail ? (
           <Detail
             detail={detail}
             job={job?.meeting_id === detail.meeting.id ? job : null}
