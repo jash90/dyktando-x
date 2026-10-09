@@ -191,20 +191,49 @@ pub fn track_duration_samples(dir: &Path, prefix: &str) -> u64 {
         .sum()
 }
 
-/// Cała ścieżka jako jeden plik WAV (eksport). Zapis idzie do pliku tymczasowego obok celu,
-/// więc przerwany eksport nie zostawia uciętego pliku ani nie psuje istniejącego.
-pub fn export_wav(dir: &Path, prefix: &str, target: &Path) -> Result<u64> {
+/// Kolejne próbki ścieżki (wszystkie segmenty po kolei) bez trzymania całości w RAM.
+/// Uszkodzony segment pomijamy, a ucięty kończymy na ostatniej poprawnej próbce (jak `read_track`).
+fn track_samples(dir: &Path, prefix: &str) -> impl Iterator<Item = i16> {
+    segments(dir, prefix)
+        .into_iter()
+        .filter_map(|path| match hound::WavReader::open(&path) {
+            Ok(r) => Some(r),
+            Err(e) => {
+                log::warn!("Pomijam {}: {e}", path.display());
+                None
+            }
+        })
+        .flat_map(|r| r.into_samples::<i16>().map_while(|s| s.ok()))
+}
+
+/// Ścieżki jako jeden plik WAV (eksport). Kilka ścieżek jest miksowanych próbka po próbce:
+/// zaczynają się w tej samej chwili (recorder dopełnia przerwy ciszą), krótszą kończy cisza.
+/// Sumę przycinamy do zakresu 16 bitów — mowa obu stron naraz zdarza się rzadko i krótko.
+/// Zapis idzie do pliku tymczasowego obok celu, więc przerwany eksport nie zostawia uciętego
+/// pliku ani nie psuje istniejącego.
+pub fn export_wav(dir: &Path, prefixes: &[&str], target: &Path) -> Result<u64> {
     let mut part = target.as_os_str().to_owned();
     part.push(".part");
     let part = PathBuf::from(part);
     let result = (|| {
         let mut w = hound::WavWriter::create(&part, spec())?;
-        let n = read_track(dir, prefix, 60, |_, chunk| {
-            for s in chunk {
-                w.write_sample((s * 32768.0).round().clamp(-32768.0, 32767.0) as i16)?;
+        let mut tracks: Vec<_> = prefixes.iter().map(|p| track_samples(dir, p).fuse()).collect();
+        let mut n = 0u64;
+        loop {
+            let mut any = false;
+            let mut sum = 0i32;
+            for t in &mut tracks {
+                if let Some(s) = t.next() {
+                    any = true;
+                    sum += s as i32;
+                }
             }
-            Ok(())
-        })?;
+            if !any {
+                break;
+            }
+            w.write_sample(sum.clamp(i16::MIN as i32, i16::MAX as i32) as i16)?;
+            n += 1;
+        }
         w.finalize()?;
         std::fs::rename(&part, target).with_context(|| format!("Nie udało się zapisać {}", target.display()))?;
         Ok(n)
@@ -297,8 +326,25 @@ mod tests {
         // Cel zajęty przez katalog: zapis do `.part` się udaje, rename już nie.
         let out = dir.join("taken.wav");
         std::fs::create_dir_all(&out).unwrap();
-        assert!(export_wav(&dir, "mic", &out).is_err());
+        assert!(export_wav(&dir, &["mic"], &out).is_err());
         assert!(!dir.join("taken.wav.part").exists());
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn mixes_tracks_and_pads_the_shorter_one() {
+        let dir = tmp();
+        let mut mic = SegmentedWriter::new(&dir, "mic").unwrap();
+        mic.append(&[0.25; 3]).unwrap();
+        mic.finish().unwrap();
+        let mut sys = SegmentedWriter::new(&dir, "system").unwrap();
+        sys.append(&[0.5, 0.75, -0.25, 0.5, 0.5]).unwrap();
+        sys.finish().unwrap();
+        let out = dir.join("mix.wav");
+        assert_eq!(export_wav(&dir, &["mic", "system"], &out).unwrap(), 5);
+        let got: Vec<i16> = hound::WavReader::open(&out).unwrap().into_samples().map(|s| s.unwrap()).collect();
+        // 0.25+0.5, 0.25+0.75 (przycięte), 0.25-0.25, potem sam system.
+        assert_eq!(got, vec![24576, i16::MAX, 0, 16384, 16384]);
         std::fs::remove_dir_all(dir).ok();
     }
 
@@ -310,7 +356,7 @@ mod tests {
         w.append(&[0.5; 100]).unwrap();
         w.finish().unwrap();
         let out = dir.join("all.wav");
-        assert_eq!(export_wav(&dir, "mic", &out).unwrap(), 40_100);
+        assert_eq!(export_wav(&dir, &["mic"], &out).unwrap(), 40_100);
         assert_eq!(hound::WavReader::open(&out).unwrap().duration(), 40_100);
         assert!(!dir.join("all.wav.part").exists());
         std::fs::remove_dir_all(dir).ok();

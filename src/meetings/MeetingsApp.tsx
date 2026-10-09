@@ -11,6 +11,7 @@ import {
   nextDrafts,
   shortDate,
   STATE_LABELS,
+  type AudioExport,
   type AudioTrack,
   type EngineId,
   type JobEvent,
@@ -168,10 +169,11 @@ export default function MeetingsApp() {
   );
 }
 
-/** Pobieranie nagrania osobno dla każdej ścieżki: mikrofon to Ty, dźwięk aplikacji to rozmówcy. */
-const EXPORTS: { track: AudioTrack; label: string; title: string }[] = [
-  { track: "mic", label: "Mój głos", title: "Pobierz nagranie z mikrofonu (to, co mówisz) jako WAV" },
-  { track: "system", label: "Rozmówcy", title: "Pobierz nagranie rozmówców (dźwięk aplikacji) jako WAV" },
+/** Pobieranie nagrania: mikrofon to Ty, dźwięk aplikacji to rozmówcy, całość to obie ścieżki zmiksowane. */
+const EXPORTS: { track: AudioExport; needs: AudioTrack[]; label: string; title: string }[] = [
+  { track: "mic", needs: ["mic"], label: "Mój głos", title: "Pobierz nagranie z mikrofonu (to, co mówisz) jako WAV" },
+  { track: "system", needs: ["system"], label: "Rozmówcy", title: "Pobierz nagranie rozmówców (dźwięk aplikacji) jako WAV" },
+  { track: "mixed", needs: ["mic", "system"], label: "Całe nagranie", title: "Pobierz całą rozmowę (Ty i rozmówcy w jednym pliku) jako WAV" },
 ];
 
 function Detail({
@@ -197,7 +199,7 @@ function Detail({
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(m.title ?? "");
   const [summaryIndex, setSummaryIndex] = useState(0);
-  const [exporting, setExporting] = useState<AudioTrack | null>(null);
+  const [exporting, setExporting] = useState<AudioExport | null>(null);
 
   useEffect(() => {
     api.getSettings().then((s: Settings) => {
@@ -231,7 +233,7 @@ function Detail({
     onChanged();
   };
 
-  const exportAudio = async (track: AudioTrack) => {
+  const exportAudio = async (track: AudioExport) => {
     onError(null);
     setExporting(track);
     try {
@@ -313,7 +315,7 @@ function Detail({
           </button>
         </div>
         <div className="group right">
-          {EXPORTS.filter((x) => detail.tracks.includes(x.track)).map((x) => (
+          {EXPORTS.filter((x) => x.needs.every((t) => detail.tracks.includes(t))).map((x) => (
             <button key={x.track} disabled={!canExport} title={x.title} onClick={() => exportAudio(x.track)}>
               <Download size={14} /> {exporting === x.track ? "Zapisywanie…" : x.label}
             </button>

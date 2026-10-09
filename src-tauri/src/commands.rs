@@ -136,6 +136,25 @@ fn track_prefix(track: Track) -> &'static str {
     }
 }
 
+/// Co pobrać: jedną ścieżkę albo obie zmiksowane w jedno nagranie rozmowy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AudioExport {
+    Mic,
+    System,
+    Mixed,
+}
+
+impl AudioExport {
+    fn tracks(self) -> &'static [Track] {
+        match self {
+            AudioExport::Mic => &[Track::Mic],
+            AudioExport::System => &[Track::System],
+            AudioExport::Mixed => &[Track::Mic, Track::System],
+        }
+    }
+}
+
 /// Ścieżki, które mają jakiekolwiek próbki (import ma tylko `system`, spotkanie bez dźwięku
 /// aplikacji tylko `mic`; po usunięciu nagrania nie ma żadnej).
 fn exportable_tracks(s: &Store, m: &Meeting) -> Vec<Track> {
@@ -189,22 +208,24 @@ pub fn reveal_meeting(app: AppHandle, id: String) -> Result<(), String> {
     app.opener().reveal_item_in_dir(target).map_err(|e| e.to_string())
 }
 
-/// Zapisuje jedną ścieżkę spotkania (mikrofon albo rozmówcy) jako jeden plik WAV we wskazanym
-/// miejscu. Zwraca ścieżkę pliku; `None` = użytkownik zamknął okno bez wyboru.
+/// Zapisuje ścieżkę spotkania (mikrofon, rozmówcy albo obie zmiksowane) jako jeden plik WAV
+/// we wskazanym miejscu. Zwraca ścieżkę pliku; `None` = użytkownik zamknął okno bez wyboru.
 #[tauri::command]
-pub async fn export_meeting_audio(app: AppHandle, id: String, track: Track) -> Result<Option<String>, String> {
+pub async fn export_meeting_audio(app: AppHandle, id: String, track: AudioExport) -> Result<Option<String>, String> {
     use tauri_plugin_dialog::DialogExt;
     let s = store();
     let meeting = s.load(&id).ok_or("Brak spotkania")?;
     if meeting.audio_in_progress() {
         return Err("Poczekaj, aż nagranie się zakończy".into());
     }
-    if !exportable_tracks(&s, &meeting).contains(&track) {
+    let available = exportable_tracks(&s, &meeting);
+    if !track.tracks().iter().all(|t| available.contains(t)) {
         return Err("Brak nagrania tej ścieżki".into());
     }
     let (title, suffix) = match track {
-        Track::Mic => ("Zapisz moją ścieżkę", "ja"),
-        Track::System => ("Zapisz ścieżkę rozmówców", "rozmowcy"),
+        AudioExport::Mic => ("Zapisz moją ścieżkę", "ja"),
+        AudioExport::System => ("Zapisz ścieżkę rozmówców", "rozmowcy"),
+        AudioExport::Mixed => ("Zapisz całe nagranie", "calosc"),
     };
     let picked = app
         .dialog()
@@ -216,7 +237,8 @@ pub async fn export_meeting_audio(app: AppHandle, id: String, track: Track) -> R
     let Some(file) = picked else { return Ok(None) };
     let target = file.into_path().map_err(|e| e.to_string())?;
     let dir = s.audio_folder(&id);
-    tauri::async_runtime::spawn_blocking(move || writer::export_wav(&dir, track_prefix(track), &target).map(|_| target))
+    let prefixes: Vec<&str> = track.tracks().iter().map(|t| track_prefix(*t)).collect();
+    tauri::async_runtime::spawn_blocking(move || writer::export_wav(&dir, &prefixes, &target).map(|_| target))
         .await
         .map_err(|e| e.to_string())?
         .map(|p| Some(p.display().to_string()))

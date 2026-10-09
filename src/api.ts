@@ -154,6 +154,8 @@ export interface MeetingDetail {
 }
 
 export type AudioTrack = "mic" | "system";
+/** Co pobrać: jedną ścieżkę albo obie zmiksowane (`mixed`). */
+export type AudioExport = AudioTrack | "mixed";
 
 export interface RecordingStatus {
   recording: boolean;
@@ -232,8 +234,8 @@ export const meetingsApi = {
   rename: (id: string, title: string) => invoke<void>("rename_meeting", { id, title }),
   remove: (id: string) => invoke<void>("delete_meeting", { id }),
   reveal: (id: string) => invoke<void>("reveal_meeting", { id }),
-  /** Okno zapisu i eksport jednej ścieżki do WAV; zwraca ścieżkę pliku, `null` = anulowano. */
-  exportAudio: (id: string, track: AudioTrack) => invoke<string | null>("export_meeting_audio", { id, track }),
+  /** Okno zapisu i eksport ścieżki (albo obu zmiksowanych) do WAV; zwraca ścieżkę pliku, `null` = anulowano. */
+  exportAudio: (id: string, track: AudioExport) => invoke<string | null>("export_meeting_audio", { id, track }),
   /** Okno wyboru pliku z nagraniem; `null` = anulowano. Wczytanie i transkrypcja idą w tle. */
   importFile: () => invoke<Meeting | null>("import_meeting"),
   transcribe: (id: string, engine?: EngineId) => invoke<void>("transcribe_meeting", { id, engine: engine ?? null }),
