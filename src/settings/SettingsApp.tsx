@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { Download, Keyboard, Mic, ShieldCheck, Sparkles, Users, Volume2, type LucideIcon } from "lucide-react";
 import { api, type Environment, type Settings } from "../api";
 import DictationPane from "./DictationPane";
@@ -18,8 +19,14 @@ const PANES: { id: PaneId; title: string; icon: LucideIcon }[] = [
   { id: "ai", title: "AI", icon: Sparkles },
   { id: "models", title: "Modele", icon: Download },
   { id: "audio", title: "Audio", icon: Volume2 },
-  { id: "system", title: "Uprawnienia", icon: ShieldCheck },
+  { id: "system", title: "System", icon: ShieldCheck },
 ];
+
+/** Panel z adresu (`index.html#system`) — tak tray otwiera nowe okno od razu na danym panelu. */
+function initialPane(): PaneId {
+  const hash = window.location.hash.slice(1);
+  return PANES.some((p) => p.id === hash) ? (hash as PaneId) : "dictation";
+}
 
 export interface PaneProps {
   settings: Settings;
@@ -30,7 +37,7 @@ export interface PaneProps {
 export default function SettingsApp() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [env, setEnv] = useState<Environment | null>(null);
-  const [pane, setPane] = useState<PaneId>("dictation");
+  const [pane, setPane] = useState<PaneId>(initialPane);
   const [warnings, setWarnings] = useState<string[]>([]);
 
   const refreshEnv = useCallback(() => {
@@ -44,7 +51,14 @@ export default function SettingsApp() {
     api.getSettings().then(setSettings);
     refreshEnv();
     window.addEventListener("focus", refreshEnv);
-    return () => window.removeEventListener("focus", refreshEnv);
+    // Już otwarte okno: tray przełącza panel zdarzeniem.
+    const un = listen<string>("open-pane", (e) => {
+      if (PANES.some((p) => p.id === e.payload)) setPane(e.payload as PaneId);
+    });
+    return () => {
+      window.removeEventListener("focus", refreshEnv);
+      un.then((f) => f());
+    };
   }, [refreshEnv]);
 
   const update = useCallback((patch: Partial<Settings>) => {

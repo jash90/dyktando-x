@@ -52,6 +52,7 @@ ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "
 ndarray = "0.17.2"
 symphonia = { version = "0.6.1", features = ["mp3", "aac", "isomp4", "alac", "aiff", "caf"] }
 tauri-plugin-autostart = "2.7.0"
+tauri-plugin-updater = "2"
 symphonia-adapter-libopus = "0.3.0"
 
 

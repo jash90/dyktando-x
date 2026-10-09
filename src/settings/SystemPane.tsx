@@ -1,5 +1,6 @@
 import type { PaneProps } from "./SettingsApp";
 import { api } from "../api";
+import UpdateCard from "./UpdateCard";
 
 const UDEV = `sudo tee /etc/udev/rules.d/70-dyktando-x.rules <<'RULES'
 KERNEL=="uinput", TAG+="uaccess"
@@ -11,6 +12,7 @@ export default function SystemPane({ env, onRefresh }: PaneProps & { onRefresh: 
   return (
     <section>
       <h1>Uprawnienia i system</h1>
+      <UpdateCard />
       {env.os === "macos" && (
         <div className="card">
           <div className="card-head">
