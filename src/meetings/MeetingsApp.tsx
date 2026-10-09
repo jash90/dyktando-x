@@ -353,8 +353,10 @@ function Detail({
         </div>
       </div>
 
-      {canTranscribe && (languageStatus.error || languageStatus.hint) && (
-        <div className={languageStatus.error ? "lang-status error" : "lang-status"}>{languageStatus.error ?? languageStatus.hint}</div>
+      {canTranscribe && (languageStatus.error || languageStatus.warning || (chosenLanguages && languageStatus.hint)) && (
+        <div className={languageStatus.error || languageStatus.warning ? "lang-status error" : "lang-status"}>
+          {languageStatus.error ?? languageStatus.warning ?? languageStatus.hint}
+        </div>
       )}
 
       {job && (

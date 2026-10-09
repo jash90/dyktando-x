@@ -12,15 +12,19 @@ export function languagesLabel(codes: string[], all: LanguageInfo[]): string {
 
 /**
  * Czy wybrany model przepisze w tych językach (lustro `Engine::check_languages`).
- * `error` blokuje przepisywanie, `hint` tylko wyjaśnia.
+ * `error` blokuje przepisywanie, `warning` ostrzega zawsze, `hint` tylko wyjaśnia wybór
+ * (pokazujemy go dopiero, gdy użytkownik sam wybrał języki).
  */
-export function languageCheck(engine: EngineId | null, codes: string[], all: LanguageInfo[]): { error?: string; hint?: string } {
+export function languageCheck(engine: EngineId | null, codes: string[], all: LanguageInfo[]): { error?: string; warning?: string; hint?: string } {
   if (!engine || engine.startsWith("whisper")) {
     return codes.length > 1 ? { hint: "Każda wypowiedź zostanie przepisana w tym z wybranych języków, w którym jest." } : {};
   }
   const model = engine === "canary_v2" ? "Canary" : "Parakeet";
   if (engine === "canary_v2" && codes.length > 1) {
     return { error: "Canary nie rozpoznaje języka sam — wybierz jeden język albo Whispera." };
+  }
+  if (engine === "canary_v2" && !codes.length) {
+    return { warning: "Canary nie rozpoznaje języka sam — bez wyboru przepisze jak po polsku. Wybierz język albo Whispera." };
   }
   const unknown = codes.filter((c) => !all.find((l) => l.code === c)?.european);
   if (unknown.length) {
