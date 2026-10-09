@@ -150,12 +150,12 @@ fn list_models(state: tauri::State<AppState>) -> Vec<ModelInfo> {
 }
 
 #[derive(Clone, Serialize)]
-struct DownloadEvent {
-    key: String,
-    done: u64,
-    total: u64,
-    finished: bool,
-    error: Option<String>,
+pub(crate) struct DownloadEvent {
+    pub key: String,
+    pub done: u64,
+    pub total: u64,
+    pub finished: bool,
+    pub error: Option<String>,
 }
 
 #[tauri::command]
