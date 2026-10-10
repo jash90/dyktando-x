@@ -51,6 +51,7 @@ run_in_linux_container() {
     -v dyktando-x-cargo-registry:/root/.cargo/registry \
     -v dyktando-x-cargo-git:/root/.cargo/git \
     -v dyktando-x-linux-target:/target \
+    -v dyktando-x-tauri-cache:/root/.cache/tauri \
     -e CARGO_TARGET_DIR=/target \
     -e APPIMAGE_EXTRACT_AND_RUN=1 \
     -e CI=true \

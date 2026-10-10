@@ -81,7 +81,7 @@ Artifacts land in `out/release/vX.Y.Z/` (gitignored).
 
 Per-platform cargo build directories are deleted after their artifacts are copied (use
 `--keep-build` to keep them). To reclaim the Linux build cache:
-`docker volume rm dyktando-x-linux-target dyktando-x-cargo-registry dyktando-x-cargo-git dyktando-x-node-modules`.
+`docker volume rm dyktando-x-linux-target dyktando-x-cargo-registry dyktando-x-cargo-git dyktando-x-node-modules dyktando-x-tauri-cache`.
 
 ## Troubleshooting
 
@@ -94,6 +94,9 @@ Per-platform cargo build directories are deleted after their artifacts are copie
 - **cargo-xwin: `could not find native static library ggml-blas`:** whisper-rs-sys decides to link
   BLAS from the *host* OS (macOS), not the target. `release.sh` puts an empty `ggml-blas.lib` on the
   link path for the Windows target; if you build by hand, do the same.
+- **`failed to run linuxdeploy` / `Exec format error` in the Linux build:** AppImage tools carry
+  magic bytes in the ELF header that amd64 emulation refuses to run. `release.sh` zeroes them in the
+  cached tools (`dyktando-x-tauri-cache` volume); delete that volume to start over.
 - **Docker build is extremely slow / runs out of space:** make sure Docker Desktop uses Rosetta for
   amd64 emulation and has enough disk (Settings → Resources).
 - **`tag vX.Y.Z already exists`:** bump the version (`scripts/bump-version.sh`); a published release is

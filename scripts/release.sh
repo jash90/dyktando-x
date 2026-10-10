@@ -32,6 +32,8 @@ Options:
   --notes TEXT   Release notes for latest.json (shown by the in-app updater). Default: empty.
   -h, --help     Show this help.
 
+Environment: RELEASE_MIN_FREE_GB (default 20) — free disk required by the preflight.
+
 Environment / keys (see RELEASING.md):
   ~/.config/local-release/apple.env          APPLE_ID, APPLE_TEAM_ID, APPLE_SIGNING_IDENTITY (SHA-1)
   keychain item local-release-apple-password  app-specific password (read at runtime, never stored)
@@ -66,7 +68,7 @@ PRODUCT="Dyktando X"
 # GitHub replaces spaces in asset names with dots; name the files that way up front so the
 # URLs in latest.json are predictable.
 ASSET_PREFIX="${PRODUCT// /.}"
-MIN_FREE_GB=20
+MIN_FREE_GB="${RELEASE_MIN_FREE_GB:-20}"
 
 # ---------------------------------------------------------------------------- preflight
 
@@ -230,7 +232,17 @@ build_linux() {
   ensure_linux_image
   local stage="out/.stage-linux"
   rm -rf "$REPO_ROOT/$stage"
+  # The AppImage tools are AppImages themselves. Their magic bytes (ELF offset 8) make
+  # Docker's amd64 emulation refuse to execute them ("Exec format error"), so the appimage
+  # plugin is fetched into Tauri's tool cache up front and the magic bytes are zeroed.
   run_in_linux_container "
+    mkdir -p /root/.cache/tauri
+    plugin=/root/.cache/tauri/linuxdeploy-plugin-appimage.AppImage
+    [ -f \$plugin ] || curl -fsSL -o \$plugin \
+      https://github.com/linuxdeploy/linuxdeploy-plugin-appimage/releases/download/continuous/linuxdeploy-plugin-appimage-x86_64.AppImage
+    for f in /root/.cache/tauri/*.AppImage; do
+      chmod +x \$f; dd if=/dev/zero of=\$f bs=1 count=3 seek=8 conv=notrunc 2>/dev/null
+    done
     npm ci
     npx tauri build --bundles deb,rpm,appimage
     mkdir -p $stage

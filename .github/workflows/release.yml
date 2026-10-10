@@ -1,4 +1,4 @@
-# Manual fallback — releases are built locally with scripts/release.sh (see RELEASING.md).
+# Manual fallback — builds/releases run locally with scripts/release.sh (see RELEASING.md).
 # Run it from the Actions tab (or `gh workflow run release.yml -f tag=vX.Y.Z -f platforms=all`)
 # after the tag exists. It uploads into the (draft) release for that tag. scripts/release.sh
 # --windows-gh uses it with platforms=windows when the Windows installer can't be built locally.

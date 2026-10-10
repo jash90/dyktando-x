@@ -1,4 +1,4 @@
-# Manual fallback — releases are built locally with scripts/release.sh (see RELEASING.md).
+# Manual fallback — builds/releases run locally with scripts/release.sh (see RELEASING.md).
 # The same checks run locally with scripts/ci.sh (also used by the opt-in .githooks/pre-push hook).
 name: CI
 

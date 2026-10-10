@@ -1,6 +1,7 @@
 # Linux x86_64 build environment for Dyktando X (used by scripts/ci.sh --linux and
 # scripts/release.sh --linux). Mirrors the ubuntu-24.04 GitHub runner: same apt packages
-# as .github/workflows/ci.yml, Node 22, Rust 1.96.
+# as .github/workflows/ci.yml (plus libssl-dev and xdg-utils, preinstalled on the runner), Node 22,
+# Rust 1.96.
 FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -9,6 +10,7 @@ RUN apt-get update \
       ca-certificates curl git build-essential pkg-config file xz-utils \
       libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf \
       libasound2-dev libdbus-1-dev libxdo-dev libclang-dev cmake \
+      libssl-dev xdg-utils \
  && rm -rf /var/lib/apt/lists/*
 
 ARG NODE_VERSION=22.22.0
