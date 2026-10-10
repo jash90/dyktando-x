@@ -152,10 +152,10 @@ preflight() {
   mkdir -p "$OUT"
 }
 
-# Copies a file into $OUT, replacing spaces in its name with dots.
+# Copies a file into $OUT, replacing spaces in its name with dots (or as $2 when given).
 collect() {
-  local src="$1" name
-  name="$(basename "$src")"
+  local src="$1" name="${2:-}"
+  [[ -n "$name" ]] || name="$(basename "$src")"
   name="${name// /.}"
   cp -R "$src" "$OUT/$name"
   printf '%s\n' "$OUT/$name"
@@ -205,7 +205,9 @@ build_mac() {
 
   local f
   f="$(collect "$dmg")"; log "  $f"
-  f="$(collect "$tarball")"; collect "$tarball.sig" >/dev/null; verify_sig "$f"
+  # Same name tauri-action used: Dyktando.X_aarch64.app.tar.gz.
+  local tar_name="${ASSET_PREFIX}_aarch64.app.tar.gz"
+  f="$(collect "$tarball" "$tar_name")"; collect "$tarball.sig" "$tar_name.sig" >/dev/null; verify_sig "$f"
   MAC_TARBALL="$(basename "$f")"
   [[ $KEEP_BUILD -eq 1 ]] || rm -rf "$TAURI_DIR/target/$target"
 }
@@ -315,6 +317,14 @@ write_latest_json() {
     platforms="$(jq --arg k "$1" --arg url "$base/$2" --rawfile sig "$OUT/$2.sig" \
       '. + {($k): {signature: $sig, url: $url}}' <<<"$platforms")"
   }
+  # Dry runs are often done one platform at a time: include what earlier dry runs of this
+  # version left in $OUT so the combined manifest can be checked.
+  if [[ $DRY_RUN -eq 1 ]]; then
+    pick() { (cd "$OUT" && ls $1 2>/dev/null | grep -v '\.sig$' | head -1) || true; }
+    : "${MAC_TARBALL:=$(pick '*_aarch64.app.tar.gz')}"
+    : "${LINUX_APPIMAGE:=$(pick '*.AppImage')}" "${LINUX_DEB:=$(pick '*.deb')}" "${LINUX_RPM:=$(pick '*.rpm')}"
+    : "${WINDOWS_EXE:=$(pick '*-setup.exe')}"
+  fi
   if [[ -n "${MAC_TARBALL:-}" ]]; then add darwin-aarch64 "$MAC_TARBALL"; add darwin-aarch64-app "$MAC_TARBALL"; fi
   if [[ -n "${LINUX_APPIMAGE:-}" ]]; then
     add linux-x86_64 "$LINUX_APPIMAGE"; add linux-x86_64-appimage "$LINUX_APPIMAGE"
