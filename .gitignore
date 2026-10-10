@@ -25,3 +25,6 @@ dist-ssr
 
 # Lokalne artefakty
 .playwright-mcp
+
+# Local release artifacts (scripts/release.sh)
+out

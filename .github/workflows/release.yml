@@ -1,31 +1,52 @@
+# Manual fallback — releases are built locally with scripts/release.sh (see RELEASING.md).
+# Run it from the Actions tab (or `gh workflow run release.yml -f tag=vX.Y.Z -f platforms=all`)
+# after the tag exists. It uploads into the (draft) release for that tag. scripts/release.sh
+# --windows-gh uses it with platforms=windows when the Windows installer can't be built locally.
 name: Release
 
 on:
-  push:
-    tags: ['v*']
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to build, e.g. v0.3.9
+        required: true
+      platforms:
+        description: Platforms to build
+        type: choice
+        default: all
+        options: [all, windows, macos, linux]
 
 jobs:
+  matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      include: ${{ steps.pick.outputs.include }}
+    steps:
+      - id: pick
+        env:
+          PLATFORMS: ${{ inputs.platforms }}
+        run: |
+          all='[
+            {"key":"macos","name":"macOS (Apple Silicon)","os":"macos-latest","args":"--target aarch64-apple-darwin"},
+            {"key":"windows","name":"Windows","os":"windows-latest","args":""},
+            {"key":"linux","name":"Linux","os":"ubuntu-24.04","args":""}
+          ]'
+          echo "include=$(jq -c --arg p "$PLATFORMS" 'map(select($p == "all" or .key == $p))' <<<"$all")" >> "$GITHUB_OUTPUT"
+
   bundle:
     name: ${{ matrix.name }}
+    needs: matrix
     permissions:
       contents: write
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - name: macOS (Apple Silicon)
-            os: macos-latest
-            args: --target aarch64-apple-darwin
-          - name: Windows
-            os: windows-latest
-            args: ''
-          - name: Linux
-            os: ubuntu-24.04
-            args: ''
+        include: ${{ fromJSON(needs.matrix.outputs.include) }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
       - name: System dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -65,7 +86,7 @@ jobs:
             echo "macOS signing: no APPLE_* secrets — bundle left unsigned"
           fi
       # Windows: without a code-signing certificate SmartScreen warns on install.
-      # Aktualizacje OTA: tauri-action podpisuje paczki aktualizacji i wgrywa latest.json do release.
+      # OTA updates: tauri-action signs the update packages and uploads latest.json to the release.
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -73,8 +94,8 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           updaterJsonPreferNsis: true
-          tagName: ${{ github.ref_name }}
-          releaseName: 'Dyktando X ${{ github.ref_name }}'
+          tagName: ${{ inputs.tag }}
+          releaseName: 'Dyktando X ${{ inputs.tag }}'
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}

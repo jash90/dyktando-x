@@ -83,6 +83,11 @@ libdbus-1-dev libxdo-dev libclang-dev cmake`.
 macOS: the app must be signed with the `com.apple.security.device.audio-input` entitlement
 (`src-tauri/Entitlements.plist`). Without it, under hardened runtime the microphone returns silence.
 
+## Releasing
+
+Releases are built, signed and published locally with `scripts/release.sh`; `scripts/ci.sh`
+runs the CI checks. See [RELEASING.md](RELEASING.md).
+
 ## Data
 
 `<data directory>/DyktandoX/` contains `models/`, `settings.json` and `Meetings/<date>/`, each with
