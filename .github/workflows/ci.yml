@@ -1,9 +1,8 @@
+# Manual fallback — builds/releases run locally with scripts/release.sh (see RELEASING.md).
+# The same checks run locally with scripts/ci.sh (also used by the opt-in .githooks/pre-push hook).
 name: CI
 
 on:
-  push:
-    branches: [main]
-  pull_request:
   workflow_dispatch:
 
 concurrency:

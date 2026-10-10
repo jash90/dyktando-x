@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Opt-in pre-push hook: git config core.hooksPath .githooks
+# Skip once with: git push --no-verify
+set -euo pipefail
+exec "$(git rev-parse --show-toplevel)/scripts/ci.sh"
