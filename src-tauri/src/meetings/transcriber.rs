@@ -11,6 +11,7 @@ use super::store::{Store, MIC, SYSTEM};
 use super::transcript::{self, SpeakerSegment, Track, TranscriptDocument, Utterance};
 use super::vad;
 use crate::engine::Engine;
+use crate::i18n;
 use crate::models::{self, AssetId, EngineId};
 
 #[derive(Debug, Clone, Serialize)]
@@ -56,15 +57,15 @@ pub struct Tuning {
 }
 
 pub fn transcribe(store: &Store, id: &str, opts: &Options, cancel: &AtomicBool, mut progress: impl FnMut(Progress)) -> Result<TranscriptDocument> {
-    let meeting = store.load(id).ok_or_else(|| anyhow!("Brak spotkania {id}"))?;
+    let meeting = store.load(id).ok_or_else(|| anyhow!(i18n::t_with("meeting.not_found_id", &[("id", &id)])))?;
     if meeting.audio_deleted {
-        return Err(anyhow!("Nagranie tego spotkania zostało już usunięte"));
+        return Err(anyhow!(i18n::t("meeting.audio_deleted")));
     }
     let audio = store.audio_folder(id);
     let vad_model = models::asset(AssetId::SileroVad);
     for needed in [vad_model, opts.engine.asset()] {
         if !needed.is_installed() {
-            return Err(anyhow!("Brak modelu {} — pobierz go w Ustawieniach → Modele", needed.title));
+            return Err(anyhow!(i18n::t_with("model.missing", &[("model", &needed.label())])));
         }
     }
     Engine::check_languages(opts.engine, &opts.languages)?;
@@ -72,27 +73,28 @@ pub fn transcribe(store: &Store, id: &str, opts: &Options, cancel: &AtomicBool, 
     let speaker_model = models::asset(AssetId::SpeakerModel);
     let diarize = opts.diarize && meeting.has_system_audio && speaker_model.is_installed();
     let is_cancelled = || cancel.load(Ordering::Relaxed);
-    let check = || if cancel.load(Ordering::Relaxed) { Err(anyhow!("Przerwano")) } else { Ok(()) };
+    let check = || if cancel.load(Ordering::Relaxed) { Err(anyhow!(super::CANCELLED)) } else { Ok(()) };
 
     // 1) Speech detection (fast: ~1–2 % of the recording time).
-    progress(Progress { step: "Wykrywanie mowy (mikrofon)".into(), fraction: 0.0 });
+    progress(Progress { step: i18n::t("job.detecting_speech_mic"), fraction: 0.0 });
     let mic_segs = vad::segments(&vad::track_probabilities(&vad_model.file_path(0), &audio, MIC, &is_cancelled)?, opts.tuning.vad);
     let sys_segs = if meeting.has_system_audio {
-        progress(Progress { step: "Wykrywanie mowy (rozmówcy)".into(), fraction: 0.03 });
+        progress(Progress { step: i18n::t("job.detecting_speech_system"), fraction: 0.03 });
         vad::segments(&vad::track_probabilities(&vad_model.file_path(0), &audio, SYSTEM, &is_cancelled)?, opts.tuning.vad)
     } else {
         Vec::new()
     };
     check()?;
     let total = (mic_segs.len() + sys_segs.len()).max(1);
-    log::info!("Spotkanie {id}: {} fragmentów mikrofonu, {} rozmówców", mic_segs.len(), sys_segs.len());
+    log::info!("Meeting {id}: {} microphone segments, {} participant segments", mic_segs.len(), sys_segs.len());
 
     // 2) Transcription of segments.
-    progress(Progress { step: "Wczytywanie modelu".into(), fraction: 0.05 });
+    progress(Progress { step: i18n::t("job.loading_model"), fraction: 0.05 });
     let mut engine = Engine::load(opts.engine)?;
     engine.set_vocabulary(&opts.vocabulary);
     let mut embedder = if diarize { Some(Embedder::load(&speaker_model.file_path(0))?) } else { None };
     let mut done = 0usize;
+    let transcribing = i18n::t("job.transcribing");
     let step = |label: &str, done: usize| Progress {
         step: format!("{label} ({done}/{total})"),
         fraction: 0.05 + 0.93 * done as f32 / total as f32,
@@ -106,7 +108,7 @@ pub fn transcribe(store: &Store, id: &str, opts: &Options, cancel: &AtomicBool, 
             mic.push(Utterance { start: mic_segs[i].0, end: mic_segs[i].1, track: Track::Mic, text, speaker: String::new(), translation: None });
         }
         done += 1;
-        progress(step("Przepisywanie", done));
+        progress(step(&transcribing, done));
         Ok(())
     })?;
 
@@ -120,20 +122,20 @@ pub fn transcribe(store: &Store, id: &str, opts: &Options, cancel: &AtomicBool, 
             system.push(Utterance { start, end, track: Track::System, text, speaker: String::new(), translation: None });
             if let Some(e) = embedder.as_mut() {
                 voices.push((end - start, e.embed(samples).unwrap_or_else(|err| {
-                    log::warn!("wektor głosu: {err}");
+                    log::warn!("voice embedding: {err}");
                     None
                 })));
             }
         }
         done += 1;
-        progress(step("Przepisywanie", done));
+        progress(step(&transcribing, done));
         Ok(())
     })?;
     drop(engine);
 
     // 3) Speakers.
     let speakers: Option<Vec<SpeakerSegment>> = if diarize && !system.is_empty() {
-        progress(Progress { step: "Rozpoznawanie mówców".into(), fraction: 0.98 });
+        progress(Progress { step: i18n::t("job.recognizing_speakers"), fraction: 0.98 });
         let groups = diarize::cluster(&voices, diarize::SAME_SPEAKER);
         Some(
             system
@@ -156,7 +158,7 @@ pub fn transcribe(store: &Store, id: &str, opts: &Options, cancel: &AtomicBool, 
     };
     std::fs::write(store.transcript_json(id), serde_json::to_vec_pretty(&doc)?)?;
     std::fs::write(store.transcript_md(id), transcript::markdown(&doc, meeting.started_at))?;
-    progress(Progress { step: "Gotowe".into(), fraction: 1.0 });
+    progress(Progress { step: i18n::t("job.done"), fraction: 1.0 });
     Ok(doc)
 }
 

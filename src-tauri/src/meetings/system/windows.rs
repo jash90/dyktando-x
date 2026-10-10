@@ -33,10 +33,8 @@ impl Capture {
         })?;
         match ready_rx.recv() {
             Ok(Ok(())) => Ok((Self { stop, thread: Some(thread) }, RATE as u32)),
-            Ok(Err(e)) => Err(anyhow!(
-                "Dźwięk systemowy: {e}. Nagrywanie dźwięku aplikacji wymaga Windows 11 albo Windows 10 (kompilacja 20348+)."
-            )),
-            Err(_) => Err(anyhow!("Dźwięk systemowy: wątek przechwytywania zakończył się")),
+            Ok(Err(e)) => Err(anyhow!(crate::i18n::t_with("system.windows_unavailable", &[("error", &e)]))),
+            Err(_) => Err(anyhow!(crate::i18n::t("system.windows_thread_ended"))),
         }
     }
 
@@ -75,7 +73,7 @@ fn run(mut sink: Sink, stop: &AtomicBool, ready: &mpsc::Sender<Result<(), String
     let capture = client.get_audiocaptureclient().map_err(|e| anyhow!("{e}"))?;
     client.start_stream().map_err(|e| anyhow!("{e}"))?;
     let _ = ready.send(Ok(()));
-    log::info!("WASAPI process loopback: {RATE} Hz, {CHANNELS} kan.");
+    log::info!("WASAPI process loopback: {RATE} Hz, {CHANNELS} ch.");
 
     let mut queue: VecDeque<u8> = VecDeque::new();
     let mut mono: Vec<f32> = Vec::new();

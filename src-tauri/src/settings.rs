@@ -84,12 +84,13 @@ impl ProviderId {
         }
     }
 
-    pub fn model_placeholder(self) -> &'static str {
+    pub fn model_placeholder(self) -> String {
+        let example = |model: &str| crate::i18n::t_with("ai.model_placeholder_example", &[("model", &model)]);
         match self {
-            Self::Anthropic => "claude-opus-5-5",
-            Self::Openai => "wybierz po „Testuj połączenie”",
-            Self::Openrouter => "np. anthropic/claude-opus-5-5",
-            Self::Zai => "np. glm-5.3",
+            Self::Anthropic => "claude-opus-5-5".into(),
+            Self::Openai => crate::i18n::t("ai.openai_model_placeholder"),
+            Self::Openrouter => example("anthropic/claude-opus-5-5"),
+            Self::Zai => example("glm-5.3"),
         }
     }
 
@@ -155,6 +156,10 @@ pub struct Settings {
     pub ai_providers: BTreeMap<ProviderId, ProviderConfig>,
     /// Empty = the default summary prompt.
     pub ai_prompt: String,
+
+    /// UI language: `"system"` (follows the system language), `"en"` or `"pl"` — see `i18n::resolve`.
+    /// Separate from the dictation language (`language`).
+    pub ui_language: String,
 }
 
 impl Default for Settings {
@@ -188,6 +193,7 @@ impl Default for Settings {
             ai_provider: ProviderId::Anthropic,
             ai_providers: BTreeMap::new(),
             ai_prompt: String::new(),
+            ui_language: "system".into(),
         }
     }
 }
@@ -243,6 +249,7 @@ mod tests {
         assert_eq!(s.language, Language::Auto);
         assert_eq!(s.shortcut_push_to_talk, "F5");
         assert_eq!(s.meeting_audio_retention_days, 30);
+        assert_eq!(s.ui_language, "system");
     }
 
     #[test]

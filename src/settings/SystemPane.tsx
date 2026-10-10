@@ -1,5 +1,6 @@
 import type { PaneProps } from "./SettingsApp";
-import { api } from "../api";
+import { api, type Settings } from "../api";
+import { useT } from "../i18n";
 import UpdateCard from "./UpdateCard";
 
 const UDEV = `sudo tee /etc/udev/rules.d/70-dyktando-x.rules <<'RULES'
@@ -8,61 +9,74 @@ SUBSYSTEM=="input", KERNEL=="event*", TAG+="uaccess"
 RULES
 sudo udevadm control --reload && sudo udevadm trigger`;
 
-export default function SystemPane({ env, onRefresh }: PaneProps & { onRefresh: () => void }) {
+export default function SystemPane({ settings, update, env, onRefresh }: PaneProps & { onRefresh: () => void }) {
+  const { t } = useT();
   return (
     <section>
-      <h1>Uprawnienia i system</h1>
+      <h1>{t("system.title")}</h1>
+      <div className="row">
+        <label>{t("system.ui_language")}</label>
+        <select value={settings.ui_language ?? "system"} onChange={(e) => update({ ui_language: e.target.value as Settings["ui_language"] })}>
+          <option value="system">{t("system.ui_language.system")}</option>
+          {/* Each language is named in itself. */}
+          <option value="en" lang="en">
+            English
+          </option>
+          <option value="pl" lang="pl">
+            Polski
+          </option>
+        </select>
+        <p className="hint">{t("system.ui_language_hint")}</p>
+      </div>
       <UpdateCard />
       {env.os === "macos" && (
         <div className="card">
           <div className="card-head">
             <div>
-              <strong>Dostępność</strong> {env.can_send_keys ? <span className="ok">nadana</span> : <span className="bad">brak</span>}
+              <strong>{t("system.accessibility")}</strong> {env.can_send_keys ? <span className="ok">{t("system.granted")}</span> : <span className="bad">{t("system.missing")}</span>}
               <div className="hint">
-                Potrzebna do skrótów globalnych i wklejania (⌘V). Bez niej tekst trafia tylko do schowka. Po nadaniu kliknij „Sprawdź ponownie”.
+                {t("system.accessibility_hint")}
               </div>
             </div>
             <div className="actions">
-              <button onClick={() => api.openAccessibilitySettings().then(onRefresh)}>Otwórz ustawienia</button>
-              <button onClick={() => api.reloadHotkeys().then(onRefresh)}>Sprawdź ponownie</button>
+              <button onClick={() => api.openAccessibilitySettings().then(onRefresh)}>{t("system.open_settings")}</button>
+              <button onClick={() => api.reloadHotkeys().then(onRefresh)}>{t("system.check_again")}</button>
             </div>
           </div>
         </div>
       )}
       {env.os === "macos" && (
         <div className="card">
-          <strong>Mikrofon</strong>
-          <div className="hint">
-            macOS zapyta o zgodę przy pierwszym nagraniu. Gdy dyktowanie zgłasza „cyfrową ciszę”, włącz Dyktando X w Ustawieniach systemowych → Prywatność → Mikrofon.
-          </div>
+          <strong>{t("system.microphone")}</strong>
+          <div className="hint">{t("system.microphone_macos")}</div>
         </div>
       )}
       {env.os === "windows" && (
         <div className="card">
-          <strong>Mikrofon</strong>
-          <div className="hint">Ustawienia → Prywatność → Mikrofon → „Zezwalaj aplikacjom klasycznym na dostęp do mikrofonu” musi być włączone.</div>
+          <strong>{t("system.microphone")}</strong>
+          <div className="hint">{t("system.microphone_windows")}</div>
         </div>
       )}
       {env.os === "linux" && (
         <>
           <div className="card">
-            <strong>Sesja: {env.wayland ? "Wayland" : "X11"}</strong>
+            <strong>{t("system.session", { session: env.wayland ? "Wayland" : "X11" })}</strong>
             <div className="hint">
               {env.wayland
-                ? "Wklejanie używa po kolei: wtype (Sway, Hyprland), dotool, ydotool. Na GNOME i KDE zainstaluj dotool albo ydotool (wymagają dostępu do /dev/uinput); bez nich tekst zostaje w schowku."
-                : "Wklejanie działa przez XTest (Ctrl+V)."}
+                ? t("system.paste_wayland")
+                : t("system.paste_x11")}
             </div>
           </div>
           <div className="card">
-            <strong>Skróty globalne</strong>
-            <div className="hint">Skróty czytają klawiaturę z /dev/input. Jednorazowo dodaj regułę udev (działa od razu, bez wylogowania):</div>
+            <strong>{t("system.global_shortcuts")}</strong>
+            <div className="hint">{t("system.udev_hint")}</div>
             <pre>{UDEV}</pre>
-            <button onClick={() => api.reloadHotkeys().then(onRefresh)}>Sprawdź ponownie</button>
+            <button onClick={() => api.reloadHotkeys().then(onRefresh)}>{t("system.check_again")}</button>
           </div>
         </>
       )}
       <div className="card">
-        <strong>Dane aplikacji</strong>
+        <strong>{t("system.app_data")}</strong>
         <div className="hint">
           <code>{env.data_dir}</code>
         </div>

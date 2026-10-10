@@ -13,7 +13,7 @@ const RATE: u32 = 16_000;
 pub fn availability() -> Result<(), String> {
     match Command::new("parec").arg("--version").stdout(Stdio::null()).stderr(Stdio::null()).status() {
         Ok(s) if s.success() => Ok(()),
-        _ => Err("Brak programu parec — zainstaluj pakiet pulseaudio-utils (Ubuntu/Debian) albo pulseaudio-utils/pipewire-pulseaudio (Fedora). Bez niego nagrywany będzie tylko mikrofon.".into()),
+        _ => Err(crate::i18n::t("system.linux_no_parec")),
     }
 }
 
@@ -34,13 +34,13 @@ impl Capture {
                 "--raw",
                 "--latency-msec=100",
                 "--client-name=Dyktando X",
-                "--stream-name=Nagrywanie spotkania",
+                &format!("--stream-name={}", crate::i18n::t("system.linux_stream_name")),
             ])
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
-            .context("uruchamianie parec")?;
-        let mut stdout = child.stdout.take().ok_or_else(|| anyhow!("parec bez wyjścia"))?;
+            .with_context(|| crate::i18n::t("system.parec_starting"))?;
+        let mut stdout = child.stdout.take().ok_or_else(|| anyhow!(crate::i18n::t("system.parec_no_output")))?;
         let thread = std::thread::Builder::new().name("system-audio".into()).spawn(move || {
             let mut buf = vec![0u8; 3200 * 4];
             let mut carry: Vec<u8> = Vec::new();
@@ -61,7 +61,7 @@ impl Capture {
                 }
             }
         })?;
-        log::info!("parec: monitor domyślnego wyjścia, {RATE} Hz");
+        log::info!("parec: monitor of the default output, {RATE} Hz");
         Ok((Self { child: Some(child), thread: Some(thread) }, RATE))
     }
 

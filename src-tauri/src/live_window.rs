@@ -14,7 +14,7 @@ pub fn show(app: &AppHandle) {
         return;
     }
     let built = WebviewWindowBuilder::new(app, LABEL, WebviewUrl::App("index.html#live".into()))
-        .title("Dyktando X — na żywo")
+        .title(crate::i18n::t("window.live"))
         .inner_size(WIDTH, HEIGHT)
         .min_inner_size(320.0, 160.0)
         .decorations(false)
@@ -30,7 +30,7 @@ pub fn show(app: &AppHandle) {
     let w = match built {
         Ok(w) => w,
         Err(e) => {
-            log::error!("okno na żywo: {e}");
+            log::error!("live window: {e}");
             return;
         }
     };

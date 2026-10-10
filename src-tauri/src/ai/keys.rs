@@ -17,7 +17,7 @@ fn set_in(service: &str, account: &str, value: &str) -> anyhow::Result<()> {
     }
     entry(service, account)
         .and_then(|e| e.set_password(value))
-        .context("Nie udało się zapisać klucza API w pęku kluczy")
+        .with_context(|| crate::i18n::t("ai.keychain_save_failed"))
 }
 
 fn get_in(service: &str, account: &str) -> Option<String> {

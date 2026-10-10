@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::engine::Engine;
+use crate::i18n::{t, t_with};
 use crate::models::EngineId;
 use crate::{paths, AppState};
 
@@ -96,7 +97,7 @@ impl History {
     }
 
     pub fn update(&self, id: &str, f: impl FnOnce(&mut Entry)) -> Result<Entry> {
-        let mut e = self.load(id).ok_or_else(|| anyhow!("Brak dyktowania {id}"))?;
+        let mut e = self.load(id).ok_or_else(|| anyhow!(t_with("dictation.not_found", &[("id", &id)])))?;
         f(&mut e);
         self.write(&e)?;
         Ok(e)
@@ -104,11 +105,11 @@ impl History {
 
     pub fn delete(&self, id: &str) -> Result<()> {
         let _ = std::fs::remove_file(self.wav(id));
-        std::fs::remove_file(self.json(id)).with_context(|| format!("usuwanie dyktowania {id}"))
+        std::fs::remove_file(self.json(id)).with_context(|| t_with("dictation.deleting", &[("id", &id)]))
     }
 
     pub fn audio(&self, id: &str) -> Result<Vec<f32>> {
-        let mut r = hound::WavReader::open(self.wav(id)).map_err(|_| anyhow!("Nagranie tego dyktowania zostało już usunięte"))?;
+        let mut r = hound::WavReader::open(self.wav(id)).map_err(|_| anyhow!(t("dictation.audio_deleted")))?;
         Ok(r.samples::<i16>().map_while(|s| s.ok()).map(|s| s as f32 / 32768.0).collect())
     }
 
@@ -137,7 +138,7 @@ fn changed(app: &AppHandle) {
 pub fn record(app: &AppHandle, entry: &Entry, audio: &[f32]) {
     match History::default().save(entry, audio) {
         Ok(()) => changed(app),
-        Err(e) => log::error!("zapis dyktowania w historii: {e}"),
+        Err(e) => log::error!("saving the dictation to history: {e}"),
     }
 }
 
@@ -160,13 +161,13 @@ pub async fn export_dictation_audio(app: AppHandle, id: String) -> Result<Option
     let h = History::default();
     let source = h.wav(&id);
     if !source.exists() {
-        return Err("Nagranie tego dyktowania zostało już usunięte".into());
+        return Err(t("dictation.audio_deleted"));
     }
     let picked = app
         .dialog()
         .file()
-        .set_title("Zapisz nagranie dyktowania")
-        .set_file_name(format!("dyktowanie-{id}.wav"))
+        .set_title(t("dialog.save_dictation"))
+        .set_file_name(t_with("export.file_dictation", &[("id", &id)]))
         .add_filter("WAV", &["wav"])
         .blocking_save_file();
     let Some(file) = picked else { return Ok(None) };
@@ -180,7 +181,7 @@ pub async fn export_dictation_audio(app: AppHandle, id: String) -> Result<Option
 pub async fn retranscribe_dictation(app: AppHandle, id: String, engine: EngineId, languages: Vec<String>) -> Result<Entry, String> {
     Engine::check_languages(engine, &languages).map_err(|e| e.to_string())?;
     if !engine.asset().is_installed() {
-        return Err(format!("Brak modelu {} — pobierz go w Ustawieniach → Modele", engine.asset().title));
+        return Err(t_with("model.missing", &[("model", &engine.asset().label())]));
     }
     let vocabulary = app.state::<AppState>().settings.lock().unwrap().vocabulary.clone();
     let entry = tauri::async_runtime::spawn_blocking(move || retranscribe(&History::default(), &id, engine, languages, &vocabulary))
@@ -199,7 +200,7 @@ fn retranscribe(h: &History, id: &str, engine: EngineId, languages: Vec<String>,
     let raw = e.transcribe_in(&audio, &codes)?;
     let text = crate::postprocess::apply(&raw);
     if text.is_empty() {
-        return Err(anyhow!("Model nic nie rozpoznał — poprzedni tekst zostaje"));
+        return Err(anyhow!(t("dictation.nothing_recognized")));
     }
     h.update(id, |x| {
         x.raw = raw;

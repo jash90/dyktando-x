@@ -23,7 +23,7 @@ pub fn availability() -> Result<(), String> {
     if (major, minor) >= (14, 4) {
         Ok(())
     } else {
-        Err(format!("Nagrywanie dźwięku aplikacji wymaga macOS 14.4 lub nowszego (masz {major}.{minor}) — nagrywany będzie tylko mikrofon."))
+        Err(crate::i18n::t_with("system.macos_too_old", &[("version", &format!("{major}.{minor}"))]))
     }
 }
 
@@ -34,11 +34,12 @@ fn macos_version() -> (u32, u32) {
     (it.next().unwrap_or(0), it.next().unwrap_or(0))
 }
 
+/// `what`: translation key of the failed step.
 fn check(status: i32, what: &str) -> Result<()> {
     if status == 0 {
         Ok(())
     } else {
-        Err(anyhow!("Dźwięk systemowy: {what} (błąd {status})"))
+        Err(anyhow!(crate::i18n::t_with("system.error_status", &[("what", &crate::i18n::t(what)), ("status", &status)])))
     }
 }
 
@@ -80,11 +81,11 @@ fn default_output_uid() -> Result<String> {
 fn output_uid(selector: u32) -> Result<String> {
     unsafe {
         let device = get_property::<AudioObjectID>(kAudioObjectSystemObject as u32, selector, None, 0)
-            .map_err(|s| anyhow!("Dźwięk systemowy: brak domyślnego wyjścia (błąd {s})"))?;
+            .map_err(|s| anyhow!(crate::i18n::t_with("system.no_default_output", &[("status", &s)])))?;
         let uid = get_property::<*const NSString>(device, kAudioDevicePropertyDeviceUID, None, std::ptr::null())
-            .map_err(|s| anyhow!("Dźwięk systemowy: brak UID wyjścia (błąd {s})"))?;
+            .map_err(|s| anyhow!(crate::i18n::t_with("system.no_output_uid_status", &[("status", &s)])))?;
         if uid.is_null() {
-            return Err(anyhow!("Dźwięk systemowy: brak UID wyjścia"));
+            return Err(anyhow!(crate::i18n::t("system.no_output_uid")));
         }
         // The property returns a CFString at +1 — we take ownership.
         let uid: Retained<NSString> = Retained::from_raw(uid as *mut NSString).ok_or_else(|| anyhow!("UID"))?;
@@ -93,7 +94,7 @@ fn output_uid(selector: u32) -> Result<String> {
 }
 
 fn ns(key: &CStr) -> Retained<NSString> {
-    NSString::from_str(key.to_str().expect("klucz Core Audio to ASCII"))
+    NSString::from_str(key.to_str().expect("Core Audio keys are ASCII"))
 }
 
 fn dict(pairs: &[(&CStr, Retained<AnyObject>)]) -> Retained<NSDictionary<NSString, AnyObject>> {
@@ -141,20 +142,20 @@ impl Capture {
         let description = CATapDescription::initStereoGlobalTapButExcludeProcesses(CATapDescription::alloc(), &excluded);
         let uuid = NSUUID::new();
         description.setUUID(&uuid);
-        description.setName(&NSString::from_str("Dyktando X — nagrywanie spotkania"));
+        description.setName(&NSString::from_str("Dyktando X — meeting recording"));
         description.setPrivate(true);
 
         let mut tap = kAudioObjectUnknown;
-        check(AudioHardwareCreateProcessTap(Some(&description), &mut tap), "nie udało się utworzyć tapu")?;
+        check(AudioHardwareCreateProcessTap(Some(&description), &mut tap), "system.create_tap")?;
         self.tap = tap;
 
         let asbd = get_property::<AudioStreamBasicDescription>(tap, kAudioTapPropertyFormat, None, std::mem::zeroed())
-            .map_err(|s| anyhow!("Dźwięk systemowy: brak formatu tapu (błąd {s})"))?;
+            .map_err(|s| anyhow!(crate::i18n::t_with("system.no_tap_format", &[("status", &s)])))?;
         let tap_rate = asbd.mSampleRate.round() as u32;
         let channels = asbd.mChannelsPerFrame.max(1) as usize;
         let non_interleaved = asbd.mFormatFlags & kAudioFormatFlagIsNonInterleaved != 0;
         if asbd.mBitsPerChannel != 32 {
-            return Err(anyhow!("Dźwięk systemowy: nieobsługiwany format tapu ({} bitów)", asbd.mBitsPerChannel));
+            return Err(anyhow!(crate::i18n::t_with("system.unsupported_tap_format", &[("bits", &asbd.mBitsPerChannel)])));
         }
 
         let output = default_output_uid()?;
@@ -165,7 +166,7 @@ impl Capture {
             (kAudioSubTapUIDKey, obj(uuid.UUIDString())),
         ]);
         let description = dict(&[
-            (kAudioAggregateDeviceNameKey, obj(NSString::from_str("Dyktando X — tap spotkania"))),
+            (kAudioAggregateDeviceNameKey, obj(NSString::from_str("Dyktando X — meeting tap"))),
             (kAudioAggregateDeviceUIDKey, obj(NSUUID::new().UUIDString())),
             (kAudioAggregateDeviceMainSubDeviceKey, obj(NSString::from_str(&output))),
             (kAudioAggregateDeviceIsPrivateKey, obj(NSNumber::new_bool(true))),
@@ -176,7 +177,7 @@ impl Capture {
         ]);
         let cf: &CFDictionary = &*(Retained::as_ptr(&description) as *const CFDictionary);
         let mut aggregate = kAudioObjectUnknown;
-        check(AudioHardwareCreateAggregateDevice(cf, NonNull::from(&mut aggregate)), "nie udało się utworzyć urządzenia zbiorczego")?;
+        check(AudioHardwareCreateAggregateDevice(cf, NonNull::from(&mut aggregate)), "system.create_aggregate")?;
         self.aggregate = aggregate;
         // Buffers arrive in the aggregate device's clock (the tap is matched to it), not in the
         // tap's format: with a 16 kHz output and a 48 kHz tap, counting by the tap lost 2/3 of the audio.
@@ -219,13 +220,13 @@ impl Capture {
         let mut proc_id: AudioDeviceIOProcID = None;
         check(
             AudioDeviceCreateIOProcIDWithBlock(NonNull::from(&mut proc_id), aggregate, Some(&queue), &*block as *const _ as *mut _),
-            "nie udało się podpiąć odczytu",
+            "system.attach_reader",
         )?;
         self.proc_id = proc_id;
         self._block = Some(block);
         self._queue = Some(queue);
-        check(AudioDeviceStart(aggregate, proc_id), "nie udało się wystartować")?;
-        log::info!("Tap systemowy: tap {tap_rate} Hz, urządzenie zbiorcze {rate} Hz, {channels} kan., wyjście {output}");
+        check(AudioDeviceStart(aggregate, proc_id), "system.start")?;
+        log::info!("System tap: tap {tap_rate} Hz, aggregate device {rate} Hz, {channels} ch., output {output}");
         Ok(rate)
     }
 

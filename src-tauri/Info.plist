@@ -2,10 +2,17 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+  <key>CFBundleDevelopmentRegion</key>
+  <string>en</string>
+  <key>CFBundleLocalizations</key>
+  <array>
+    <string>en</string>
+    <string>pl</string>
+  </array>
   <key>NSMicrophoneUsageDescription</key>
-  <string>Dyktando X nagrywa mikrofon, żeby zamienić mowę na tekst. Nagrania są przetwarzane lokalnie.</string>
+  <string>Dyktando X records the microphone to turn speech into text. Recordings are processed locally.</string>
   <key>NSAudioCaptureUsageDescription</key>
-  <string>Dyktando X nagrywa dźwięk aplikacji do spotkań (np. Zoom, Meet), żeby przepisać wypowiedzi rozmówców.</string>
+  <string>Dyktando X records the audio of meeting apps (e.g. Zoom, Meet) to transcribe what the other participants say.</string>
   <key>LSUIElement</key>
   <true/>
 </dict>

@@ -69,7 +69,7 @@ impl SegmentedWriter {
         }
         self.index += 1;
         let path = segment_path(&self.dir, &self.prefix, self.index);
-        self.current = Some(hound::WavWriter::create(&path, spec()).with_context(|| format!("tworzenie {}", path.display()))?);
+        self.current = Some(hound::WavWriter::create(&path, spec()).with_context(|| crate::i18n::t_with("file.creating", &[("path", &path.display())]))?);
         self.in_segment = 0;
         Ok(())
     }
@@ -82,7 +82,7 @@ impl SegmentedWriter {
             }
             let room = (SEGMENT_SECONDS * RATE as u64 - self.in_segment) as usize;
             let (now, later) = rest.split_at(room.min(rest.len()));
-            let w = self.current.as_mut().expect("otwarty segment");
+            let w = self.current.as_mut().expect("open segment");
             for s in now {
                 w.write_sample((s.clamp(-1.0, 1.0) * 32767.0).round() as i16)?;
             }
@@ -163,7 +163,7 @@ pub fn read_track(dir: &Path, prefix: &str, chunk_seconds: u32, mut on_chunk: im
         let mut reader = match hound::WavReader::open(&path) {
             Ok(r) => r,
             Err(e) => {
-                log::warn!("Pomijam {}: {e}", path.display());
+                log::warn!("Skipping {}: {e}", path.display());
                 continue;
             }
         };
@@ -203,7 +203,7 @@ fn track_samples(dir: &Path, prefix: &str) -> impl Iterator<Item = i16> {
         let samples: Box<dyn Iterator<Item = i16>> = match hound::WavReader::open(&path) {
             Ok(r) => Box::new(r.into_samples::<i16>().map_while(|s| s.ok())),
             Err(e) => {
-                log::warn!("Pomijam {}: {e}", path.display());
+                log::warn!("Skipping {}: {e}", path.display());
                 Box::new(std::iter::empty())
             }
         };
@@ -244,7 +244,7 @@ pub fn export_wav(dir: &Path, prefixes: &[&str], target: &Path) -> Result<u64> {
             n += 1;
         }
         w.finalize()?;
-        std::fs::rename(&part, target).with_context(|| format!("Nie udało się zapisać {}", target.display()))?;
+        std::fs::rename(&part, target).with_context(|| crate::i18n::t_with("file.save_failed", &[("path", &target.display())]))?;
         Ok(n)
     })();
     if result.is_err() {

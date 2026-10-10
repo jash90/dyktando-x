@@ -2,8 +2,10 @@ import { useCallback, useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import type { PaneProps } from "./SettingsApp";
 import { api, formatBytes, type DownloadEvent, type ModelInfo } from "../api";
+import { useT } from "../i18n";
 
 export default function ModelsPane({ settings, update }: PaneProps) {
+  const { t } = useT();
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [progress, setProgress] = useState<Record<string, number>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -39,14 +41,14 @@ export default function ModelsPane({ settings, update }: PaneProps) {
   };
 
   const remove = (m: ModelInfo) => {
-    if (!confirm(`Usunąć ${m.title} (${formatBytes(m.size)})?`)) return;
+    if (!confirm(t("models.confirm_delete", { title: m.title, size: formatBytes(m.size) }))) return;
     api.deleteModel(m.id).then(refresh);
   };
 
   return (
     <section>
-      <h1>Modele</h1>
-      <p className="hint">Modele działają lokalnie — nagrania nie opuszczają komputera.</p>
+      <h1>{t("models.title")}</h1>
+      <p className="hint">{t("models.hint")}</p>
       {models.map((m) => {
         const p = progress[m.key];
         const busy = m.downloading || p !== undefined;
@@ -56,25 +58,25 @@ export default function ModelsPane({ settings, update }: PaneProps) {
             <div className="card-head">
               <div>
                 <strong>{m.title}</strong>
-                {engine && settings.engine === engine && <span className="badge">dyktowanie</span>}
-                {engine && settings.meeting_engine === engine && <span className="badge">spotkania</span>}
+                {engine && settings.engine === engine && <span className="badge">{t("models.badge_dictation")}</span>}
+                {engine && settings.meeting_engine === engine && <span className="badge">{t("models.badge_meetings")}</span>}
                 <div className="hint">
                   {m.description} · {formatBytes(m.size)}
                 </div>
               </div>
               <div className="actions">
-                {m.installed && engine && settings.engine !== engine && <button onClick={() => update({ engine })}>Używaj</button>}
+                {m.installed && engine && settings.engine !== engine && <button onClick={() => update({ engine })}>{t("models.use")}</button>}
                 {m.installed && !busy && (
                   <button className="danger" onClick={() => remove(m)}>
-                    Usuń
+                    {t("common.delete")}
                   </button>
                 )}
                 {!m.installed && !busy && (
                   <button className="primary" onClick={() => download(m)}>
-                    Pobierz
+                    {t("models.download")}
                   </button>
                 )}
-                {busy && <button onClick={() => api.cancelDownload(m.id)}>Przerwij</button>}
+                {busy && <button onClick={() => api.cancelDownload(m.id)}>{t("common.cancel")}</button>}
               </div>
             </div>
             {busy && (

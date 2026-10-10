@@ -11,6 +11,7 @@ use super::import;
 use super::store::{Meeting, State, Store};
 use super::transcriber::{self, Options};
 use crate::ai::{keys, provider::LlmConfig, summarizer};
+use crate::i18n;
 use crate::models::{self, AssetId, EngineId};
 use crate::settings::ProviderId;
 use crate::AppState;
@@ -53,7 +54,7 @@ impl Jobs {
     fn begin(&self, id: &str, kind: JobKind) -> Result<Arc<AtomicBool>> {
         let mut cur = self.current.lock().unwrap();
         if let Some((other, _, _)) = cur.as_ref() {
-            return Err(anyhow!("Trwa już przetwarzanie spotkania {other} — poczekaj albo je przerwij"));
+            return Err(anyhow!(i18n::t_with("job.busy", &[("id", other)])));
         }
         let flag = Arc::new(AtomicBool::new(false));
         *cur = Some((id.to_string(), kind, flag.clone()));
@@ -102,11 +103,11 @@ async fn ensure_support_models(app: &AppHandle, id: &str, diarize: bool, engine:
                 }
             };
             if !ours {
-                emit(app, event(id, JobKind::Transcribe, format!("Czekam na pobieranie: {}", asset.title), 0.0));
+                emit(app, event(id, JobKind::Transcribe, i18n::t_with("job.waiting_for_download", &[("model", &asset.label())]), 0.0));
                 tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                 continue;
             }
-            let (app2, title, key2) = (app.clone(), asset.title, key.clone());
+            let (app2, title, key2) = (app.clone(), asset.label(), key.clone());
             let mut last_percent = u32::MAX;
             let result = asset
                 .download(cancel, move |done, total| {
@@ -114,7 +115,7 @@ async fn ensure_support_models(app: &AppHandle, id: &str, diarize: bool, engine:
                     let percent = (f * 100.0) as u32;
                     if percent != last_percent {
                         last_percent = percent;
-                        emit(&app2, event(id, JobKind::Transcribe, format!("Pobieranie: {title} ({percent}%)"), f * 0.05));
+                        emit(&app2, event(id, JobKind::Transcribe, i18n::t_with("job.downloading", &[("model", &title), ("percent", &percent)]), f * 0.05));
                         // The same progress in Settings → Models.
                         let _ = app2.emit("model-download", crate::DownloadEvent { key: key2.clone(), done, total, finished: false, error: None });
                     }
@@ -126,7 +127,7 @@ async fn ensure_support_models(app: &AppHandle, id: &str, diarize: bool, engine:
             result?;
         }
         if cancel.load(Ordering::Relaxed) {
-            return Err(anyhow!("Przerwano"));
+            return Err(anyhow!(super::CANCELLED));
         }
     }
     Ok(())
@@ -139,12 +140,12 @@ pub async fn transcribe(app: AppHandle, id: String, engine: Option<EngineId>, la
     let cancel = state.jobs.begin(&id, JobKind::Transcribe)?;
     let store = Store::default();
     let result: Result<()> = async {
-        let previous = store.load(&id).ok_or_else(|| anyhow!("Brak spotkania"))?.state;
+        let previous = store.load(&id).ok_or_else(|| anyhow!(i18n::t("meeting.not_found")))?.state;
         store.update(&id, |m| {
             m.state = State::Transcribing;
             m.last_error = None;
         })?;
-        emit(&app, event(&id, JobKind::Transcribe, "Przygotowanie", 0.0));
+        emit(&app, event(&id, JobKind::Transcribe, i18n::t("job.preparing"), 0.0));
         let engine = engine.unwrap_or(settings.meeting_engine);
         let languages = languages.unwrap_or_else(|| settings.meeting_language.code().map(String::from).into_iter().collect());
         // Model download and transcription together: an error or cancellation of either part
@@ -198,7 +199,7 @@ pub async fn summarize(app: AppHandle, id: String, provider: ProviderId, model: 
     let cancel = state.jobs.begin(&id, JobKind::Summarize)?;
     let store = Store::default();
     let result: Result<()> = async {
-        let transcript = std::fs::read_to_string(store.transcript_md(&id)).map_err(|_| anyhow!("Najpierw przepisz spotkanie"))?;
+        let transcript = std::fs::read_to_string(store.transcript_md(&id)).map_err(|_| anyhow!(i18n::t("meeting.transcribe_first")))?;
         let mut config = LlmConfig::load(&settings, provider).map_err(|e| anyhow!(e.message))?;
         if let Some(m) = model.filter(|m| !m.trim().is_empty()) {
             config.model = m;
@@ -211,7 +212,7 @@ pub async fn summarize(app: AppHandle, id: String, provider: ProviderId, model: 
         let id2 = id.clone();
         let label = format!("{} · {}", provider.display_name(), config.model);
         let work = summarizer::summarize(&config, &transcript, prompt, move |done, total| {
-            let step = if total > 1 { format!("{label} — część {}/{}", (done + 1).min(total), total) } else { label.clone() };
+            let step = if total > 1 { i18n::t_with("job.part", &[("label", &label), ("part", &(done + 1).min(total)), ("total", &total)]) } else { label.clone() };
             emit(&app2, event(&id2, JobKind::Summarize, step, 0.05 + 0.9 * done as f32 / total.max(1) as f32));
         });
         // Cancellation: we drop the request (future), the state returns to the previous one.
@@ -237,7 +238,7 @@ pub async fn summarize(app: AppHandle, id: String, provider: ProviderId, model: 
             }
             None => {
                 store.update(&id, |m| m.state = previous)?;
-                Err(anyhow!("Przerwano"))
+                Err(anyhow!(super::CANCELLED))
             }
         }
     }
@@ -248,7 +249,7 @@ pub async fn summarize(app: AppHandle, id: String, provider: ProviderId, model: 
 }
 
 fn finish(app: &AppHandle, id: &str, kind: JobKind, error: Option<String>) {
-    emit(app, JobEvent { meeting_id: id.into(), kind, step: if error.is_some() { "Błąd".into() } else { "Gotowe".into() }, fraction: 1.0, finished: true, error });
+    emit(app, JobEvent { meeting_id: id.into(), kind, step: i18n::t(if error.is_some() { "job.error" } else { "job.done" }), fraction: 1.0, finished: true, error });
     let _ = app.emit("meetings-changed", ());
 }
 
@@ -266,7 +267,7 @@ pub fn import_file(app: AppHandle, path: std::path::PathBuf) -> Result<Meeting> 
     };
     let (m, id) = (meeting.clone(), meeting.id.clone());
     tauri::async_runtime::spawn(async move {
-        emit(&app, event(&id, JobKind::Import, "Wczytywanie pliku", 0.0));
+        emit(&app, event(&id, JobKind::Import, i18n::t("job.loading_file"), 0.0));
         let (app2, id2) = (app.clone(), id.clone());
         let r = tauri::async_runtime::spawn_blocking(move || {
             // Progress every 1 % — a long file has tens of thousands of packets.
@@ -274,7 +275,7 @@ pub fn import_file(app: AppHandle, path: std::path::PathBuf) -> Result<Meeting> 
             import::fill(&store, &m, &path, &cancel, |f| {
                 if f - shown >= 0.01 {
                     shown = f;
-                    emit(&app2, event(&id2, JobKind::Import, "Wczytywanie pliku", f));
+                    emit(&app2, event(&id2, JobKind::Import, i18n::t("job.loading_file"), f));
                 }
             })
         })

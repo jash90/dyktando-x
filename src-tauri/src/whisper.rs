@@ -46,7 +46,7 @@ impl Whisper {
             GPU_DEVICE_AUTO => auto_select_gpu_device(),
             device => device,
         };
-        let path = path.to_str().context("Ścieżka modelu nie jest UTF-8")?;
+        let path = path.to_str().with_context(|| crate::i18n::t("whisper.path_not_utf8"))?;
         let context = WhisperContext::new_with_params(path, params).map_err(|e| anyhow!("{e}"))?;
         let state = context.create_state().map_err(|e| anyhow!("{e}"))?;
         Ok(Self { state, _context: context, prompt: None })
@@ -67,7 +67,7 @@ impl Whisper {
             .filter_map(|&code| Some((code, *probs.get(whisper_rs::get_lang_id(code)? as usize)?)))
             .max_by(|a, b| a.1.total_cmp(&b.1))
             .map(|(code, _)| code)
-            .ok_or_else(|| anyhow!("Whisper nie zna żadnego z wybranych języków"))
+            .ok_or_else(|| anyhow!(crate::i18n::t("whisper.no_language")))
     }
 
     /// `language: None` = whisper.cpp detects the language itself (among all of them).
@@ -89,7 +89,7 @@ impl Whisper {
         self.state.full(params, samples).map_err(|e| anyhow!("{e}"))?;
         let mut text = String::new();
         for i in 0..self.state.full_n_segments() {
-            let segment = self.state.get_segment(i).ok_or_else(|| anyhow!("brak segmentu {i}"))?;
+            let segment = self.state.get_segment(i).ok_or_else(|| anyhow!(crate::i18n::t_with("whisper.no_segment", &[("index", &i)])))?;
             text.push_str(segment.to_str().map_err(|e| anyhow!("{e}"))?);
         }
         if self.prompt.as_deref().is_some_and(|p| is_prompt_echo(&text, p)) {

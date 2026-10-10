@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
+import { t as translate, useT } from "../i18n";
 
 /** Converts a keyboard event to handy-keys notation, e.g. "Ctrl+Alt+R", "F5". */
 export function eventToShortcut(e: KeyboardEvent, mac: boolean): string | null {
@@ -29,7 +30,7 @@ export function eventToShortcut(e: KeyboardEvent, mac: boolean): string | null {
 }
 
 export function prettyShortcut(s: string, mac: boolean): string {
-  if (!s) return "brak";
+  if (!s) return translate("shortcut.none");
   if (!mac) return s.replace(/\+/g, " + ");
   const map: Record<string, string> = { Ctrl: "⌃", Opt: "⌥", Alt: "⌥", Shift: "⇧", Cmd: "⌘" };
   return s
@@ -49,6 +50,7 @@ export default function ShortcutRecorder({
   mac: boolean;
   allowEmpty?: boolean;
 }) {
+  const { t } = useT();
   const [recording, setRecording] = useState(false);
   const ref = useRef<HTMLButtonElement>(null);
 
@@ -78,11 +80,11 @@ export default function ShortcutRecorder({
   return (
     <span className="shortcut">
       <button ref={ref} className={`key ${recording ? "recording" : ""}`} onClick={() => setRecording((r) => !r)}>
-        {recording ? "Naciśnij skrót… (Esc anuluje)" : prettyShortcut(value, mac)}
+        {recording ? t("shortcut.press") : prettyShortcut(value, mac)}
       </button>
       {allowEmpty && value && !recording && (
         <button className="link" onClick={() => onChange("")}>
-          Wyłącz
+          {t("shortcut.disable")}
         </button>
       )}
     </span>

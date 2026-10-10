@@ -6,6 +6,7 @@ use transcribe_rs::onnx::canary::{CanaryModel, CanaryParams};
 use transcribe_rs::onnx::parakeet::{ParakeetModel, ParakeetParams, TimestampGranularity};
 use transcribe_rs::onnx::Quantization;
 
+use crate::i18n::{t, t_with};
 use crate::languages;
 use crate::models::EngineId;
 use crate::settings::Language;
@@ -23,18 +24,18 @@ impl Engine {
     pub fn load(id: EngineId) -> Result<Self> {
         let asset = id.asset();
         if !asset.is_installed() {
-            return Err(anyhow!("Model {} nie jest pobrany", asset.title));
+            return Err(anyhow!(t_with("model.not_downloaded", &[("model", &asset.label())])));
         }
         Ok(match id {
             EngineId::ParakeetV3 => Engine::Parakeet(
                 ParakeetModel::load(&asset.dir_path(), &Quantization::Int8)
-                    .map_err(|e| anyhow!("Nie udało się wczytać Parakeeta: {e}"))?,
+                    .map_err(|e| anyhow!(t_with("engine.load_parakeet", &[("error", &e)])))?,
             ),
             EngineId::CanaryV2 => Engine::Canary(
-                CanaryModel::load(&asset.dir_path(), &Quantization::Int8).map_err(|e| anyhow!("Nie udało się wczytać Canary: {e}"))?,
+                CanaryModel::load(&asset.dir_path(), &Quantization::Int8).map_err(|e| anyhow!(t_with("engine.load_canary", &[("error", &e)])))?,
             ),
             EngineId::WhisperTurbo | EngineId::WhisperLargeV3 => Engine::Whisper(
-                Whisper::load(&asset.file_path(0)).map_err(|e| anyhow!("Nie udało się wczytać Whispera: {e}"))?,
+                Whisper::load(&asset.file_path(0)).map_err(|e| anyhow!(t_with("engine.load_whisper", &[("error", &e)])))?,
             ),
         })
     }
@@ -50,17 +51,17 @@ impl Engine {
     /// itself, several = mixed-language conversation). Checked before loading the model.
     pub fn check_languages(id: EngineId, languages: &[String]) -> Result<()> {
         if let Some(code) = languages.iter().find(|c| languages::name(c).is_none()) {
-            bail!("Nieznany język „{code}”");
+            bail!(t_with("engine.unknown_language", &[("code", &code)]));
         }
         let model = id.asset().title;
         match id {
             EngineId::WhisperTurbo | EngineId::WhisperLargeV3 => {}
             EngineId::CanaryV2 if languages.len() > 1 => {
-                bail!("{model} nie rozpoznaje języka sam — rozmowę w kilku językach przepisz Whisperem albo Parakeetem")
+                bail!(t_with("engine.no_language_detection", &[("model", &model)]))
             }
             EngineId::ParakeetV3 | EngineId::CanaryV2 => {
                 if let Some(code) = languages.iter().find(|c| !languages::EUROPEAN.contains(&c.as_str())) {
-                    bail!("{model} nie zna języka: {} — wybierz Whispera", languages::name(code).unwrap_or(code));
+                    bail!(t_with("engine.language_unsupported", &[("model", &model), ("language", &languages::name(code).unwrap_or(code))]));
                 }
             }
         }
@@ -95,7 +96,7 @@ impl Engine {
     /// Speech translation to `target` (language code, e.g. "en") — see `can_translate`.
     pub fn translate(&mut self, samples: &[f32], language: Language, target: &str) -> Result<String> {
         if !self.can_translate(language, target) {
-            return Err(anyhow!("Ten model nie tłumaczy z {} na {target}", language.code().unwrap_or("auto")));
+            return Err(anyhow!(t_with("engine.no_translation", &[("source", &language.code().unwrap_or("auto")), ("target", &target)])));
         }
         self.run(samples, language.code().as_slice(), Some(target))
     }
@@ -125,7 +126,7 @@ impl Engine {
                 let source = match languages {
                     [] => "pl",
                     [one] => one,
-                    _ => bail!("Canary nie rozpoznaje języka sam — wybierz jeden język"),
+                    _ => bail!(t("engine.canary_one_language")),
                 };
                 let params = CanaryParams {
                     language: Some(source.to_string()),

@@ -45,7 +45,7 @@ impl Drop for Owned {
 }
 
 fn cfstr(s: &str) -> Owned {
-    let c = CString::new(s).expect("bez NUL");
+    let c = CString::new(s).expect("no NUL");
     Owned(unsafe { CFStringCreateWithCString(std::ptr::null(), c.as_ptr(), UTF8) })
 }
 

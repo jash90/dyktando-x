@@ -1,5 +1,6 @@
 import { type CSSProperties } from "react";
 import Markdown from "../components/Markdown";
+import { t, useT } from "../i18n";
 
 /** An utterance from `transcript.md`: „[00:01:30] **Rozmówca 1:** tekst” (speaker, text). */
 interface Line {
@@ -11,8 +12,29 @@ interface Line {
 }
 
 const LINE = /^\[(\d{2}:\d{2}:\d{2})\]\s+\*\*(.+?):\*\*\s*(.*)$/;
+// Canonical speaker labels as written by the backend into transcript.md / live events — they stay
+// Polish in the files (old meetings keep parsing); only the displayed label is translated.
 const ME = "Ja";
+const OTHERS = "Rozmówcy";
+const SPEAKER_N = /^Rozmówca (\d+)$/;
 const PALETTE = 6;
+
+/** Display label for a canonical speaker label: "Ja" → "Me", "Rozmówca 2" → "Speaker 2"; custom names unchanged. */
+export function speakerLabel(name: string): string {
+  if (name === ME) return t("speaker.me");
+  if (name === OTHERS) return t("speaker.others");
+  const n = name.match(SPEAKER_N);
+  return n ? t("speaker.numbered", { n: n[1] }) : name;
+}
+
+/** One chip of the „Długość: … · Model: … · Mówcy: …” header line, with translated labels. */
+function metaLabel(part: string): string {
+  const m = part.match(/^(Długość|Model|Mówcy):\s*(.*)$/);
+  if (!m) return part;
+  if (m[1] === "Długość") return t("transcript.meta.duration", { value: m[2] });
+  if (m[1] === "Model") return t("transcript.meta.model", { value: m[2] });
+  return t("transcript.meta.speakers", { value: m[2].split(", ").map(speakerLabel).join(", ") });
+}
 
 /** The same speaker always gets the same colour (number from the name, otherwise the sum of its character codes). */
 function speakerColor(name: string): CSSProperties {
@@ -29,6 +51,7 @@ function shortTime(t: string): string {
 
 /** Transcript as a list of utterances (time, speaker, text); an unusual file falls back to plain Markdown. */
 export default function Transcript({ text }: { text: string }) {
+  useT(); // re-render on locale change
   const rows = text.split("\n");
   const lines: Line[] = [];
   for (const r of rows) {
@@ -50,7 +73,7 @@ export default function Transcript({ text }: { text: string }) {
         <div className="transcript-meta">
           {meta.map((m) => (
             <span key={m} className="chip">
-              {m}
+              {metaLabel(m)}
             </span>
           ))}
         </div>
@@ -61,7 +84,7 @@ export default function Transcript({ text }: { text: string }) {
           return (
             <div key={i} className={`utt${continued ? " cont" : ""}`} style={speakerColor(l.speaker)}>
               <time>{shortTime(l.time)}</time>
-              {!continued && <span className={`who${l.speaker === ME ? " me" : ""}`}>{l.speaker}</span>}
+              {!continued && <span className={`who${l.speaker === ME ? " me" : ""}`}>{speakerLabel(l.speaker)}</span>}
               <p>{l.text}</p>
               {l.translation && <p className="translation">{l.translation}</p>}
             </div>

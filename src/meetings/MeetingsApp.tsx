@@ -10,7 +10,8 @@ import {
   meetingsApi,
   nextDrafts,
   shortDate,
-  STATE_LABELS,
+  isCancelled,
+  stateLabel,
   type AudioExport,
   type AudioTrack,
   type EngineId,
@@ -28,11 +29,13 @@ import {
 import Markdown from "../components/Markdown";
 import LanguagePicker, { languageCheck } from "./LanguagePicker";
 import DictationsView from "./DictationsView";
-import Transcript from "./Transcript";
+import Transcript, { speakerLabel } from "./Transcript";
+import { useT, type PlainKey } from "../i18n";
 
 type Tab = "summary" | "transcript";
 
 export default function MeetingsApp() {
+  const { t } = useT();
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<MeetingDetail | null>(null);
@@ -62,7 +65,7 @@ export default function MeetingsApp() {
       listen<RecordingStatus>("meeting-status", (e) => setStatus(e.payload)),
       listen<JobEvent>("meeting-job", (e) => {
         setJob(e.payload.finished ? null : e.payload);
-        if (e.payload.finished && e.payload.error && e.payload.error !== "Przerwano") setError(e.payload.error);
+        if (e.payload.finished && e.payload.error && !isCancelled(e.payload.error)) setError(e.payload.error);
       }),
       listen<LivePayload>("meeting-live", (e) => {
         const { utterance, error: err } = e.payload;
@@ -126,35 +129,35 @@ export default function MeetingsApp() {
       <nav className="sidebar meeting-list">
         <div className="view-switch" role="tablist">
           <button role="tab" aria-selected={view === "meetings"} className={view === "meetings" ? "on" : ""} onClick={() => setView("meetings")}>
-            Spotkania
+            {t("meetings.tab_meetings")}
           </button>
           <button role="tab" aria-selected={view === "dictations"} className={view === "dictations" ? "on" : ""} onClick={() => setView("dictations")}>
-            Dyktowania
+            {t("meetings.tab_dictations")}
           </button>
         </div>
         {view === "dictations" ? (
           <>
-            <input className="search" placeholder="Szukaj w dyktowaniach…" value={query} onChange={(e) => setQuery(e.target.value)} />
-            <div className="hint">Każde dyktowanie trafia tutaj (tekst i nagranie). Można to wyłączyć w Ustawieniach → Dyktowanie.</div>
+            <input className="search" placeholder={t("meetings.search_dictations")} value={query} onChange={(e) => setQuery(e.target.value)} />
+            <div className="hint">{t("meetings.dictations_hint")}</div>
           </>
         ) : (
           <>
             <button className={`record ${status?.recording ? "on" : ""}`} onClick={toggleRecording}>
               {status?.recording ? <Square size={14} fill="currentColor" /> : <Circle size={14} fill="currentColor" />}
-              {status?.recording ? `Zatrzymaj · ${clock(status.seconds)}` : "Nagraj spotkanie"}
+              {status?.recording ? t("meetings.stop", { time: clock(status.seconds) }) : t("meetings.record")}
             </button>
-            <button className="import" onClick={importFile} title="Plik z nagraniem rozmowy (MP3, M4A, WAV, FLAC, OGG, Opus…) — zostanie przepisany jak spotkanie">
-              <FileAudio size={14} /> Importuj nagranie
+            <button className="import" onClick={importFile} title={t("meetings.import_title")}>
+              <FileAudio size={14} /> {t("meetings.import")}
             </button>
             {status?.recording && status.warning && <div className="hint warn-text">{status.warning}</div>}
             <div className="list">
-              {meetings.length === 0 && <div className="hint">Brak nagrań. Kliknij „Nagraj spotkanie”, użyj skrótu z ustawień albo zaimportuj plik z nagraniem.</div>}
+              {meetings.length === 0 && <div className="hint">{t("meetings.empty_list")}</div>}
               {meetings.map((m) => (
                 <button key={m.id} className={`item ${selected === m.id ? "active" : ""}`} onClick={() => setSelected(m.id)}>
                   <span className="item-title">{m.title || shortDate(m.startedAt)}</span>
                   <span className="item-meta">
                     {m.title ? `${shortDate(m.startedAt)} · ` : ""}
-                    {clock(m.durationSeconds)} · <span className={`state state-${m.state}`}>{STATE_LABELS[m.state]}</span>
+                    {clock(m.durationSeconds)} · <span className={`state state-${m.state}`}>{stateLabel(m.state)}</span>
                   </span>
                 </button>
               ))}
@@ -166,7 +169,7 @@ export default function MeetingsApp() {
         {error && (
           <div className="banner warn closable">
             <AlertTriangle size={16} /> <span>{error}</span>
-            <button className="link" onClick={() => setError(null)} aria-label="Zamknij">
+            <button className="link" onClick={() => setError(null)} aria-label={t("common.close")}>
               <X size={14} />
             </button>
           </div>
@@ -185,7 +188,7 @@ export default function MeetingsApp() {
         ) : (
           <div className="empty">
             <Mic size={40} strokeWidth={1.5} />
-            <p>Nagrywaj spotkania w Meet, Zoom czy Teams: Dyktando X zapisze Twój mikrofon i głosy rozmówców, przepisze je lokalnie i — jeśli chcesz — podsumuje przez AI.</p>
+            <p>{t("meetings.empty")}</p>
           </div>
         )}
       </main>
@@ -194,10 +197,10 @@ export default function MeetingsApp() {
 }
 
 /** Recording download: microphone = you, app audio = the other participants, full = both tracks mixed. */
-const EXPORTS: { track: AudioExport; needs: AudioTrack[]; label: string; title: string }[] = [
-  { track: "mic", needs: ["mic"], label: "Mój głos", title: "Pobierz nagranie z mikrofonu (to, co mówisz) jako WAV" },
-  { track: "system", needs: ["system"], label: "Rozmówcy", title: "Pobierz nagranie rozmówców (dźwięk aplikacji) jako WAV" },
-  { track: "mixed", needs: ["mic", "system"], label: "Całe nagranie", title: "Pobierz całą rozmowę (Ty i rozmówcy w jednym pliku) jako WAV" },
+const EXPORTS: { track: AudioExport; needs: AudioTrack[]; label: PlainKey; title: PlainKey }[] = [
+  { track: "mic", needs: ["mic"], label: "export.mic", title: "export.mic_title" },
+  { track: "system", needs: ["system"], label: "export.system", title: "export.system_title" },
+  { track: "mixed", needs: ["mic", "system"], label: "export.mixed", title: "export.mixed_title" },
 ];
 
 /** „Nagranie ▾” ("Recording ▾") — download a single track or the whole conversation as WAV. */
@@ -212,6 +215,7 @@ function DownloadMenu({
   exporting: AudioExport | null;
   onPick: (track: AudioExport) => void;
 }) {
+  const { t } = useT();
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -235,7 +239,7 @@ function DownloadMenu({
         aria-haspopup="menu"
         aria-expanded={open}
         aria-busy={!!exporting}
-        title={exporting ? "Zapisywanie nagrania…" : "Pobierz nagranie (WAV)"}
+        title={exporting ? t("export.saving") : t("common.download_wav")}
         onClick={() => setOpen((o) => !o)}
       >
         {exporting ? <LoaderCircle size={17} className="spin" /> : <Download size={17} />}
@@ -254,8 +258,8 @@ function DownloadMenu({
             >
               <Download size={14} />
               <span>
-                {x.label}
-                <small>{x.title}</small>
+                {t(x.label)}
+                <small>{t(x.title)}</small>
               </span>
             </button>
           ))}
@@ -280,6 +284,7 @@ function Detail({
   onError: (e: string | null) => void;
   onChanged: () => void;
 }) {
+  const { t } = useT();
   const m = detail.meeting;
   const [tab, setTab] = useState<Tab>(detail.summaries.length && !live ? "summary" : "transcript");
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
@@ -326,7 +331,7 @@ function Detail({
     try {
       await f();
     } catch (e) {
-      if (String(e) !== "Przerwano") onError(String(e));
+      if (!isCancelled(e)) onError(String(e));
     }
     onChanged();
   };
@@ -363,29 +368,29 @@ function Detail({
           >
             <input autoFocus value={title} placeholder={shortDate(m.startedAt)} onChange={(e) => setTitle(e.target.value)} />
             <button type="submit" className="primary">
-              Zapisz
+              {t("common.save")}
             </button>
           </form>
         ) : (
           <div className="title-row">
             <h1>
-              {m.title || `Spotkanie ${shortDate(m.startedAt)}`}
-              <button className="icon" onClick={() => setEditing(true)} title="Zmień nazwę" aria-label="Zmień nazwę">
+              {m.title || t("meeting.default_title", { date: shortDate(m.startedAt) })}
+              <button className="icon" onClick={() => setEditing(true)} title={t("meeting.rename")} aria-label={t("meeting.rename")}>
                 <Pencil size={15} />
               </button>
             </h1>
             <div className="title-actions">
               <DownloadMenu tracks={detail.tracks} disabled={!canExport} exporting={exporting} onPick={exportAudio} />
-              <button className="icon" onClick={() => meetingsApi.reveal(m.id)} title="Pokaż pliki" aria-label="Pokaż pliki">
+              <button className="icon" onClick={() => meetingsApi.reveal(m.id)} title={t("meeting.reveal")} aria-label={t("meeting.reveal")}>
                 <FolderOpen size={17} />
               </button>
               <button
                 className="icon danger"
                 disabled={recording}
-                title="Usuń spotkanie"
-                aria-label="Usuń spotkanie"
+                title={t("meeting.delete")}
+                aria-label={t("meeting.delete")}
                 onClick={() => {
-                  if (confirm("Usunąć to spotkanie razem z nagraniem, transkryptem i podsumowaniami?")) run(() => meetingsApi.remove(m.id));
+                  if (confirm(t("meeting.confirm_delete"))) run(() => meetingsApi.remove(m.id));
                 }}
               >
                 <Trash2 size={17} />
@@ -396,20 +401,23 @@ function Detail({
         <div className="meta">
           <span className="chip mono">{shortDate(m.startedAt)}</span>
           <span className="chip mono">{clock(m.durationSeconds)}</span>
-          <span className="chip">{m.hasSystemAudio ? "mikrofon + rozmówcy" : "tylko mikrofon"}</span>
+          <span className="chip">{m.hasSystemAudio ? t("meeting.mic_and_others") : t("meeting.mic_only")}</span>
           {m.transcriptEngine && <span className="chip">{m.transcriptEngine}</span>}
-          {m.audioDeleted && <span className="chip">nagranie usunięte, tekst zostaje</span>}
+          {m.audioDeleted && <span className="chip">{t("meeting.audio_deleted")}</span>}
           <span className="chip">
-            <span className={`state state-${m.state}`}>{STATE_LABELS[m.state]}</span>
+            <span className={`state state-${m.state}`}>{stateLabel(m.state)}</span>
           </span>
         </div>
         {m.lastError && <div className="error">{m.lastError}</div>}
         {m.audioGaps?.length > 0 && (
           <div className="error">
-            Przerwy w nagraniu (dźwięk się urwał i był wznawiany):{" "}
-            {m.audioGaps.map((g) => `${g.track === "mic" ? "mikrofon" : "rozmówcy"} ${clock(g.start)} (${Math.round(g.seconds)} s)`).join(", ")}.{" "}
+            {t("meeting.gaps")}{" "}
+            {m.audioGaps
+              .map((g) => t("meeting.gap", { track: g.track === "mic" ? t("meeting.track_mic") : t("meeting.track_system"), at: clock(g.start), seconds: Math.round(g.seconds) }))
+              .join(", ")}
+            .{" "}
             <button className="link" onClick={() => api.revealLogs()}>
-              Pokaż logi
+              {t("common.show_logs")}
             </button>
           </div>
         )}
@@ -418,10 +426,10 @@ function Detail({
       <div className="controls">
         <div className="control">
           <div className="control-label">
-            <Wand2 size={12} /> Transkrypcja
+            <Wand2 size={12} /> {t("meeting.transcription")}
           </div>
           <div className="control-row">
-            <select value={engine ?? ""} onChange={(e) => setEngine(e.target.value as EngineId)} disabled={!canTranscribe} aria-label="Model">
+            <select value={engine ?? ""} onChange={(e) => setEngine(e.target.value as EngineId)} disabled={!canTranscribe} aria-label={t("common.model")}>
               {(Object.keys(ENGINE_LABELS) as EngineId[]).map((id) => (
                 <option key={id} value={id}>
                   {ENGINE_LABELS[id]}
@@ -432,33 +440,33 @@ function Detail({
             <button
               className="go primary"
               disabled={!canTranscribe || !!languageStatus.error}
-              title={languageStatus.error ?? (detail.transcript ? "Przepisz ponownie wybranym modelem i językiem" : "Przepisz nagranie")}
+              title={languageStatus.error ?? (detail.transcript ? t("common.retranscribe_hint") : t("meeting.transcribe_hint"))}
               onClick={() => run(() => meetingsApi.transcribe(m.id, engine ?? undefined, languages))}
             >
-              Przepisz
+              {t("meeting.transcribe")}
             </button>
           </div>
         </div>
         <div className="control">
           <div className="control-label">
-            <Sparkles size={12} /> Podsumowanie AI
+            <Sparkles size={12} /> {t("meeting.ai_summary")}
           </div>
           <div className="control-row">
-            <select value={provider} onChange={(e) => setProvider(e.target.value)} disabled={!canSummarize} aria-label="Dostawca AI">
+            <select value={provider} onChange={(e) => setProvider(e.target.value)} disabled={!canSummarize} aria-label={t("meeting.ai_provider")}>
               {providers.map((p) => (
                 <option key={p.id} value={p.id} disabled={!p.has_key}>
                   {p.name}
-                  {p.has_key ? "" : " (brak klucza)"}
+                  {p.has_key ? "" : ` ${t("ai.no_key_suffix")}`}
                 </option>
               ))}
             </select>
             <button
               className="go primary"
               disabled={!canSummarize || !providerInfo?.has_key}
-              title={providerInfo?.has_key ? "" : "Dodaj klucz API w Ustawieniach → AI"}
+              title={providerInfo?.has_key ? "" : t("meeting.add_key")}
               onClick={() => providerInfo && run(() => meetingsApi.summarize(m.id, providerInfo.id))}
             >
-              Podsumuj
+              {t("meeting.summarize")}
             </button>
           </div>
         </div>
@@ -478,19 +486,19 @@ function Detail({
               {job.step} — {Math.round(job.fraction * 100)}%
             </em>
           </div>
-          <button onClick={() => meetingsApi.cancelJob()}>Przerwij</button>
+          <button onClick={() => meetingsApi.cancelJob()}>{t("common.cancel")}</button>
         </div>
       )}
 
       <div className="tabs">
         <button className={tab === "summary" ? "active" : ""} onClick={() => setTab("summary")}>
-          <Sparkles size={14} /> Podsumowanie {detail.summaries.length > 1 ? `(${detail.summaries.length})` : ""}
+          <Sparkles size={14} /> {t("meeting.tab_summary")} {detail.summaries.length > 1 ? `(${detail.summaries.length})` : ""}
         </button>
         <button className={tab === "transcript" ? "active" : ""} onClick={() => setTab("transcript")}>
-          <FileText size={14} /> Transkrypt
+          <FileText size={14} /> {t("meeting.tab_transcript")}
         </button>
         <button className="link right" onClick={copy}>
-          Kopiuj
+          {t("meeting.copy")}
         </button>
       </div>
 
@@ -512,8 +520,8 @@ function Detail({
           ) : (
             <p className="hint">
               {detail.transcript
-                ? "Brak podsumowania. Wybierz dostawcę i kliknij „Podsumuj” — transkrypt zostanie wysłany do wybranego dostawcy AI."
-                : "Najpierw przepisz spotkanie."}
+                ? t("meeting.no_summary")
+                : t("meeting.transcribe_first")}
             </p>
           ))}
         {tab === "transcript" &&
@@ -522,7 +530,7 @@ function Detail({
           ) : detail.transcript ? (
             <Transcript text={detail.transcript} />
           ) : (
-            <p className="hint">{recording ? "Trwa nagrywanie…" : "Brak transkryptu. Kliknij „Przepisz”."}</p>
+            <p className="hint">{recording ? t("meeting.recording_now") : t("meeting.no_transcript")}</p>
           ))}
       </div>
     </section>
@@ -530,12 +538,13 @@ function Detail({
 }
 
 function liveText(items: Utterance[]): string {
-  return items.map((u) => `[${clock(u.start)}] ${u.speaker}: ${u.text}${u.translation ? `\n    ${u.translation}` : ""}`).join("\n");
+  return items.map((u) => `[${clock(u.start)}] ${speakerLabel(u.speaker)}: ${u.text}${u.translation ? `\n    ${u.translation}` : ""}`).join("\n");
 }
 
 /// Live transcription: finalized utterances plus (in grey) draft text of ongoing ones — refreshed every
 /// ~1.5 s, without waiting for a pause. The view auto-scrolls to the end.
 function LiveTranscript({ items, drafts, error }: { items: Utterance[]; drafts: Utterance[]; error: string | null }) {
+  const { t } = useT();
   const end = useRef<HTMLDivElement>(null);
   useEffect(() => {
     end.current?.scrollIntoView({ block: "nearest" });
@@ -543,14 +552,14 @@ function LiveTranscript({ items, drafts, error }: { items: Utterance[]; drafts: 
   return (
     <div className="live">
       <p className="hint">
-        <span className="live-dot" /> Na żywo — tekst tymczasowy, bez rozpoznawania rozmówców. Pełny transkrypt powstanie po zakończeniu nagrania.
+        <span className="live-dot" /> {t("meeting.live_note")}
       </p>
-      {error && <div className="error">Transkrypcja na żywo niedostępna: {error}</div>}
-      {items.length === 0 && drafts.length === 0 && !error && <p className="hint">Słucham…</p>}
+      {error && <div className="error">{t("live.unavailable", { error })}</div>}
+      {items.length === 0 && drafts.length === 0 && !error && <p className="hint">{t("live.listening")}</p>}
       {[...items, ...drafts].map((u, i) => (
         <div key={`${u.track}-${u.start}-${i >= items.length ? "draft" : ""}`} className={`live-line${i >= items.length ? " draft" : ""}`}>
           <time>{clock(u.start)}</time>
-          <b className={u.track === "mic" ? "me" : ""}>{u.speaker}:</b> {u.text}
+          <b className={u.track === "mic" ? "me" : ""}>{speakerLabel(u.speaker)}:</b> {u.text}
           {u.translation && <div className="live-translation">{u.translation}</div>}
         </div>
       ))}

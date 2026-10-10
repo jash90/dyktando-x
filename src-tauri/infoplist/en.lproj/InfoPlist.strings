@@ -1,0 +1,3 @@
+/* Permission prompts (English; the same texts as in Info.plist). */
+NSMicrophoneUsageDescription = "Dyktando X records the microphone to turn speech into text. Recordings are processed locally.";
+NSAudioCaptureUsageDescription = "Dyktando X records the audio of meeting apps (e.g. Zoom, Meet) to transcribe what the other participants say.";

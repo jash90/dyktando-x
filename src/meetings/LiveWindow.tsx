@@ -2,12 +2,15 @@ import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { FileText, Square, X } from "lucide-react";
 import { clock, draftList, meetingsApi, nextDrafts, type LiveDrafts, type LivePayload, type RecordingStatus, type Utterance } from "../api";
+import { useT } from "../i18n";
+import { speakerLabel } from "./Transcript";
 
 /** How many recent utterances to keep in the small window. */
 const KEEP = 60;
 
 /** The "live" window during recording: timer, levels of both tracks, recent utterances. */
 export default function LiveWindow() {
+  const { t } = useT();
   const [status, setStatus] = useState<RecordingStatus | null>(null);
   const [items, setItems] = useState<Utterance[]>([]);
   const [drafts, setDrafts] = useState<LiveDrafts>({});
@@ -54,27 +57,27 @@ export default function LiveWindow() {
           {recording ? clock(status!.seconds) : "—"}
         </span>
         <div className="live-meters" data-tauri-drag-region>
-          <Meter label="Ja" level={status?.mic_level ?? 0} />
-          {status?.has_system_audio ? <Meter label="Rozmówcy" level={status.system_level} /> : <span className="live-meter">tylko mikrofon</span>}
+          <Meter label={t("speaker.me")} level={status?.mic_level ?? 0} />
+          {status?.has_system_audio ? <Meter label={t("speaker.others")} level={status.system_level} /> : <span className="live-meter">{t("meeting.mic_only")}</span>}
         </div>
         <span className="spacer" data-tauri-drag-region />
-        <button className="icon" title="Okno spotkań" aria-label="Okno spotkań" onClick={() => meetingsApi.open()}>
+        <button className="icon" title={t("live.meetings_window")} aria-label={t("live.meetings_window")} onClick={() => meetingsApi.open()}>
           <FileText size={15} />
         </button>
-        <button className="icon stop" title="Zatrzymaj nagranie" aria-label="Zatrzymaj nagranie" disabled={!recording} onClick={() => meetingsApi.stop().catch(() => {})}>
+        <button className="icon stop" title={t("live.stop")} aria-label={t("live.stop")} disabled={!recording} onClick={() => meetingsApi.stop().catch(() => {})}>
           <Square size={15} fill="currentColor" />
         </button>
-        <button className="icon" title="Schowaj okno" aria-label="Schowaj okno" onClick={() => meetingsApi.hideLiveWindow()}>
+        <button className="icon" title={t("live.hide")} aria-label={t("live.hide")} onClick={() => meetingsApi.hideLiveWindow()}>
           <X size={15} />
         </button>
       </div>
       {status?.warning && <div className="live-warn">{status.warning}</div>}
-      {liveError && <div className="live-warn">Transkrypcja na żywo niedostępna: {liveError}</div>}
+      {liveError && <div className="live-warn">{t("live.unavailable", { error: liveError })}</div>}
       <div className="live-body">
-        {items.length === 0 && draftList(drafts).length === 0 && !liveError && <p className="hint">{recording ? "Słucham…" : "Nic nie jest nagrywane."}</p>}
+        {items.length === 0 && draftList(drafts).length === 0 && !liveError && <p className="hint">{recording ? t("live.listening") : t("live.idle")}</p>}
         {[...items, ...draftList(drafts)].map((u, i) => (
           <div key={`${u.track}-${u.start}-${i >= items.length ? "draft" : ""}`} className={`live-line${i >= items.length ? " draft" : ""}`}>
-            <b className={u.track === "mic" ? "me" : ""}>{u.speaker}:</b>
+            <b className={u.track === "mic" ? "me" : ""}>{speakerLabel(u.speaker)}:</b>
             {u.text}
             {u.translation && <div className="live-translation">{u.translation}</div>}
           </div>

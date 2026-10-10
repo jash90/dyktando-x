@@ -13,3 +13,7 @@ pub mod transcriber;
 pub mod transcript;
 pub mod vad;
 pub mod writer;
+
+/// Error text of a cancelled job. A fixed token, not translated: the meetings window compares
+/// against it to stay silent about a cancellation (it's never shown).
+pub const CANCELLED: &str = "Przerwano";

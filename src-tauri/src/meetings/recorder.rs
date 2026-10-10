@@ -25,6 +25,7 @@ use super::transcript::{self, TranscriptDocument, Utterance};
 use super::writer::{SegmentedWriter, RATE};
 use crate::audio::capture::{self, InputCapture};
 use crate::audio::resample::StreamResampler;
+use crate::i18n;
 
 /// A gap larger than this (in 16 kHz samples) is filled with silence.
 const GAP_TOLERANCE: u64 = RATE as u64 / 2;
@@ -98,7 +99,7 @@ impl RateWatch {
 }
 
 struct Track {
-    /// "mikrofon" / "rozmówcy" ("microphone" / "participants") — for logs.
+    /// "microphone" / "participants" — for logs.
     name: &'static str,
     writer: Option<SegmentedWriter>,
     resampler: Option<StreamResampler>,
@@ -126,7 +127,7 @@ impl Track {
     /// `now`: time the chunk was received in the audio thread (s from the start of recording), not the write time.
     fn push(&mut self, now: f64, samples: &[f32]) {
         if let Some(rate) = self.watch.as_mut().and_then(|w| w.push(samples.len(), now)) {
-            log::warn!("Źródło daje {rate} Hz zamiast zgłoszonych — przestawiam przeliczanie");
+            log::warn!("The source delivers {rate} Hz instead of the declared rate — switching the resampling");
             let watch = self.watch.take();
             self.set_rate(rate);
             self.watch = watch;
@@ -143,7 +144,7 @@ impl Track {
         if expected > after + GAP_TOLERANCE && w.samples_written() > 0 && self.report_gaps {
             let (start, len) = (w.samples_written() as f64 / RATE as f64, (expected - after) as f64 / RATE as f64);
             if len >= 1.0 {
-                log::warn!("Przerwa w dostawie dźwięku ({}): {len:.1} s od {start:.1} s", self.name);
+                log::warn!("Gap in audio delivery ({}): {len:.1} s from {start:.1} s", self.name);
             }
             self.gaps.push((start, len));
         }
@@ -151,7 +152,7 @@ impl Track {
         if let Err(e) = result {
             // Disk full etc. — remember the first error, we'll show it on stop.
             if self.error.is_none() {
-                log::error!("zapis ścieżki: {e}");
+                log::error!("writing the track: {e}");
                 self.error = Some(e.to_string());
             }
         }
@@ -167,7 +168,7 @@ impl Track {
         }
         if self.report_gaps && have > 0 && expected > have + GAP_TOLERANCE {
             let (start, len) = (have as f64 / RATE as f64, (expected - have) as f64 / RATE as f64);
-            log::warn!("Brak dźwięku do końca nagrania ({}): {len:.1} s od {start:.1} s", self.name);
+            log::warn!("No audio until the end of the recording ({}): {len:.1} s from {start:.1} s", self.name);
             self.gaps.push((start, len));
         }
         let _ = w.append_silence(expected - have);
@@ -249,13 +250,13 @@ impl Warnings {
         let mut parts: Vec<String> = Vec::new();
         parts.extend(self.system_unavailable.clone());
         if self.system_lost {
-            parts.push("Dźwięk rozmówców się urwał — wznawiam nagrywanie…".into());
+            parts.push(i18n::t("recorder.system_lost"));
         }
         if self.mic_lost {
-            parts.push("Mikrofon się urwał — wznawiam nagrywanie…".into());
+            parts.push(i18n::t("recorder.mic_lost"));
         }
         if self.mic_silent {
-            parts.push("Mikrofon nagrywa samą ciszę — sprawdź, czy nie jest wyciszony.".into());
+            parts.push(i18n::t("recorder.mic_silent"));
         }
         (!parts.is_empty()).then(|| parts.join(" "))
     }
@@ -343,7 +344,7 @@ struct Problem {
 /// Why the source has to be recreated (`None` = it's working).
 fn system_problem(src: &Sources, watch: &Watch, now_ms: u64) -> Option<Problem> {
     let guard = src.system.lock().unwrap();
-    let Some(c) = guard.as_ref() else { return Some(Problem { why: "przechwytywanie nie działa", dropout: true }) };
+    let Some(c) = guard.as_ref() else { return Some(Problem { why: "capture isn't running", dropout: true }) };
     // Where silence = no buffers (Windows), a lack of deliveries tells us nothing.
     if !system::DELIVERS_IN_SILENCE {
         return None;
@@ -351,28 +352,28 @@ fn system_problem(src: &Sources, watch: &Watch, now_ms: u64) -> Option<Problem> 
     if c.buffers_received() == 0 {
         // A tap created before the user granted permission delivers nothing (macOS).
         let waited = now_ms.saturating_sub(watch.since_ms) > 4_000;
-        return waited.then_some(Problem { why: "nie oddaje dźwięku", dropout: false });
+        return waited.then_some(Problem { why: "delivers no audio", dropout: false });
     }
     if watch.idle_ms(&src.sys_flow, now_ms) > STALL_MS {
-        return Some(Problem { why: "dostawy ustały", dropout: true });
+        return Some(Problem { why: "deliveries stopped", dropout: true });
     }
-    c.device_changed().then_some(Problem { why: "zmieniło się wyjście dźwięku", dropout: true })
+    c.device_changed().then_some(Problem { why: "the audio output changed", dropout: true })
 }
 
 fn mic_problem(src: &Sources, watch: &Watch, now_ms: u64, check_default: bool) -> Option<&'static str> {
     let guard = src.mic.lock().unwrap();
-    let Some(m) = guard.as_ref() else { return Some("przechwytywanie nie działa") };
+    let Some(m) = guard.as_ref() else { return Some("capture isn't running") };
     if m.failed() {
-        return Some("strumień zgłosił błąd");
+        return Some("the stream reported an error");
     }
     if watch.idle_ms(&src.mic_flow, now_ms) > STALL_MS {
-        return Some("dostawy ustały");
+        return Some("deliveries stopped");
     }
     // When recording from the default microphone (no other one chosen, or the chosen one is missing),
     // we follow changes of the default — e.g. after headphones are plugged in.
     let follows_default = src.input_device.as_deref().is_none_or(|d| d != m.device_name);
     if check_default && follows_default && capture::default_input_name().is_some_and(|d| d != m.device_name) {
-        return Some("zmienił się domyślny mikrofon");
+        return Some("the default microphone changed");
     }
     None
 }
@@ -392,19 +393,19 @@ fn supervise(src: Arc<Sources>, system_wanted: bool, stop: Arc<AtomicBool>) {
                 Some(Problem { why, dropout }) if sys.may_retry(now) => {
                     sys.retries += 1;
                     sys.last_try_ms = now;
-                    log::warn!("Dźwięk rozmówców: {why} — tworzę przechwytywanie od nowa (próba {})", sys.retries);
+                    log::warn!("Participants' audio: {why} — recreating the capture (attempt {})", sys.retries);
                     if dropout {
                         src.warnings.lock().unwrap().system_lost = true;
                     }
                     src.stop_system();
                     match src.start_system() {
                         Ok(()) => sys.since_ms = src.now_ms(),
-                        Err(e) => log::error!("Dźwięk rozmówców: {e}"),
+                        Err(e) => log::error!("Participants' audio: {e}"),
                     }
                 }
                 Some(_) => {}
                 None if sys.retries > 0 && sys.idle_ms(&src.sys_flow, now) < 1_000 => {
-                    log::info!("Dźwięk rozmówców wrócił");
+                    log::info!("Participants' audio is back");
                     sys.retries = 0;
                     src.warnings.lock().unwrap().system_lost = false;
                 }
@@ -416,20 +417,20 @@ fn supervise(src: Arc<Sources>, system_wanted: bool, stop: Arc<AtomicBool>) {
             Some(why) if mic.may_retry(now) => {
                 mic.retries += 1;
                 mic.last_try_ms = now;
-                log::warn!("Mikrofon: {why} — tworzę przechwytywanie od nowa (próba {})", mic.retries);
+                log::warn!("Microphone: {why} — recreating the capture (attempt {})", mic.retries);
                 src.warnings.lock().unwrap().mic_lost = true;
                 src.stop_mic();
                 match src.start_mic() {
                     Ok(name) => {
                         mic.since_ms = src.now_ms();
-                        log::info!("Mikrofon: {name}");
+                        log::info!("Microphone: {name}");
                     }
-                    Err(e) => log::error!("Mikrofon: {e}"),
+                    Err(e) => log::error!("Microphone: {e}"),
                 }
             }
             Some(_) => {}
             None if mic.retries > 0 && mic.idle_ms(&src.mic_flow, now) < 1_000 => {
-                log::info!("Mikrofon wrócił");
+                log::info!("Microphone is back");
                 mic.retries = 0;
                 src.warnings.lock().unwrap().mic_lost = false;
             }
@@ -441,7 +442,7 @@ fn supervise(src: Arc<Sources>, system_wanted: bool, stop: Arc<AtomicBool>) {
         let mut w = src.warnings.lock().unwrap();
         if silent != w.mic_silent {
             if silent {
-                log::warn!("Mikrofon daje same zera od {} s", zero_since / 1000);
+                log::warn!("Microphone delivers only zeros since {} s", zero_since / 1000);
             }
             w.mic_silent = silent;
         }
@@ -455,7 +456,7 @@ fn write_loop(rx: mpsc::Receiver<Msg>, started: Instant, mic_track: Arc<Mutex<Tr
         let Msg::Audio(kind, at, samples) = msg else { break };
         let lag = started.elapsed().as_secs_f64() - at;
         if lag > 2.0 && !lagging {
-            log::warn!("Zapis nagrania nie nadąża (opóźnienie {lag:.1} s) — dźwięk czeka w pamięci");
+            log::warn!("Recording writes can't keep up (lag {lag:.1} s) — audio waits in memory");
         }
         // We warn after exceeding 2 s, and again only after dropping below 0.5 s.
         lagging = if lagging { lag > 0.5 } else { lag > 2.0 };
@@ -526,7 +527,7 @@ impl Recorder {
     pub fn start(&self, store: &Store, input_device: Option<&str>, live: Option<(live::Config, LiveListener)>) -> Result<Meeting> {
         let mut guard = self.active.lock().unwrap();
         if guard.is_some() {
-            return Err(anyhow!("Nagrywanie już trwa"));
+            return Err(anyhow!(i18n::t("recorder.already_recording")));
         }
         let system_available = system::availability();
         let meeting = store.create(Local::now(), system_available.is_ok())?;
@@ -539,16 +540,16 @@ impl Recorder {
             match Live::start(config, Box::new(move |e| l(&id, e))) {
                 Ok(l) => Some(Arc::new(l)),
                 Err(e) => {
-                    log::warn!("transkrypcja na żywo wyłączona: {e}");
+                    log::warn!("live transcription disabled: {e}");
                     listener(&meeting.id, live::Event::Error(e.to_string()));
                     None
                 }
             }
         });
         let tee = |kind| live.as_ref().map(|l| (l.clone(), kind));
-        let mic_track = Arc::new(Mutex::new(Track::new("mikrofon", SegmentedWriter::new(&audio, MIC)?, tee(transcript::Track::Mic), true)));
+        let mic_track = Arc::new(Mutex::new(Track::new("microphone", SegmentedWriter::new(&audio, MIC)?, tee(transcript::Track::Mic), true)));
         let sys_track = Arc::new(Mutex::new(Track::new(
-            "rozmówcy",
+            "participants",
             SegmentedWriter::new(&audio, SYSTEM)?,
             tee(transcript::Track::System),
             system::DELIVERS_IN_SILENCE,
@@ -581,7 +582,7 @@ impl Recorder {
             Err(e) => {
                 stop_writer(&sources, writer);
                 let _ = store.delete(&meeting.id);
-                return Err(anyhow!("Mikrofon: {e}"));
+                return Err(anyhow!(i18n::t_with("mic.error", &[("error", &e)])));
             }
         };
         let mut system_wanted = false;
@@ -590,7 +591,7 @@ impl Recorder {
                 Ok(()) => system_wanted = true,
                 Err(e) => {
                     log::warn!("{e}");
-                    sources.warnings.lock().unwrap().system_unavailable = Some(format!("{e} Nagrywam tylko mikrofon."));
+                    sources.warnings.lock().unwrap().system_unavailable = Some(i18n::t_with("recorder.mic_only", &[("error", &e)]));
                 }
             }
         }
@@ -601,7 +602,7 @@ impl Recorder {
             std::thread::Builder::new().name("meeting-monitor".into()).spawn(move || supervise(src, system_wanted, stop))?
         };
 
-        log::info!("Nagrywanie spotkania {} (mikrofon: {mic_name})", meeting.id);
+        log::info!("Recording meeting {} (microphone: {mic_name})", meeting.id);
         *guard = Some(Active { meeting: meeting.clone(), sources, stop_monitor, monitor: Some(monitor), writer: Some(writer), live });
         Ok(meeting)
     }
@@ -610,7 +611,7 @@ impl Recorder {
     /// Text from live transcription is saved as a temporary transcript (without speakers);
     /// the full transcription after recording will overwrite it.
     pub fn stop(&self, store: &Store) -> Result<Meeting> {
-        let mut a = self.active.lock().unwrap().take().ok_or_else(|| anyhow!("Nic nie jest nagrywane"))?;
+        let mut a = self.active.lock().unwrap().take().ok_or_else(|| anyhow!(i18n::t("recorder.not_recording")))?;
         a.stop_monitor.store(true, Ordering::Relaxed);
         if let Some(m) = a.monitor.take() {
             let _ = m.join();
@@ -640,7 +641,7 @@ impl Recorder {
             gaps.extend(t.gaps.iter().filter(|g| g.1 >= REPORTED_GAP_S).map(|&(start, seconds)| AudioGap { track: kind, start, seconds }));
         }
         if !gaps.is_empty() {
-            log::warn!("Spotkanie {}: {} przerw(y) w nagraniu, razem {:.0} s", a.meeting.id, gaps.len(), gaps.iter().map(|g| g.seconds).sum::<f64>());
+            log::warn!("Meeting {}: {} gap(s) in the recording, {:.0} s in total", a.meeting.id, gaps.len(), gaps.iter().map(|g| g.seconds).sum::<f64>());
         }
         let live_engine = a.live.take().and_then(|l| {
             let utterances = l.finish();
@@ -651,7 +652,7 @@ impl Recorder {
             match save_live_transcript(store, &a.meeting, &engine, seconds, &utterances) {
                 Ok(()) => Some(engine),
                 Err(e) => {
-                    log::error!("zapis transkryptu na żywo: {e}");
+                    log::error!("saving the live transcript: {e}");
                     None
                 }
             }
@@ -667,7 +668,7 @@ impl Recorder {
                 m.transcript_engine = live_engine.clone();
             }
         })?;
-        log::info!("Koniec nagrania {} ({:.0} s)", meeting.id, seconds);
+        log::info!("Recording {} ended ({:.0} s)", meeting.id, seconds);
         Ok(meeting)
     }
 }
@@ -870,7 +871,7 @@ mod tests {
         assert_eq!(w.text(), None);
         let w = Warnings { system_lost: true, mic_silent: true, ..Default::default() };
         let text = w.text().unwrap();
-        assert!(text.contains("rozmówców") && text.contains("wyciszony"), "{text}");
+        assert!(text.contains("participants'") && text.contains("muted"), "{text}");
     }
 
     /// Chunks every 10 ms for `secs` seconds, `rate` samples/s; returns the first reported change.

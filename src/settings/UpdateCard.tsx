@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import Markdown from "../components/Markdown";
 import { api, formatBytes, type UpdateInfo, type UpdateProgress } from "../api";
+import { t as translate, useT } from "../i18n";
 
 const RELEASES = "https://github.com/jash90/dyktando-x/releases/latest";
 
@@ -16,6 +17,7 @@ type Status =
   | { kind: "error"; message: string; info?: UpdateInfo };
 
 export default function UpdateCard() {
+  const { t } = useT();
   const [version, setVersion] = useState("");
   const [status, setStatus] = useState<Status>({ kind: "idle" });
 
@@ -31,7 +33,7 @@ export default function UpdateCard() {
       setStatus((s) => (s.kind === "installing" && !p.finished ? { ...s, done: p.done, total: p.total } : s));
     });
     const unFailed = listen<string>("update-check-failed", (e) => {
-      setStatus((s) => (s.kind === "installing" ? s : { kind: "error", message: `Nie udało się sprawdzić aktualizacji: ${e.payload}` }));
+      setStatus((s) => (s.kind === "installing" ? s : { kind: "error", message: translate("update.check_failed", { error: e.payload }) }));
     });
     return () => {
       unStatus.then((f) => f());
@@ -45,7 +47,7 @@ export default function UpdateCard() {
     api
       .checkUpdate()
       .then((info) => setStatus(info ? { kind: "available", info } : { kind: "latest" }))
-      .catch((e) => setStatus({ kind: "error", message: `Nie udało się sprawdzić aktualizacji: ${e}` }));
+      .catch((e) => setStatus({ kind: "error", message: t("update.check_failed", { error: String(e) }) }));
   };
 
   const install = (info: UpdateInfo) => {
@@ -61,24 +63,24 @@ export default function UpdateCard() {
     <div className="card">
       <div className="card-head">
         <div>
-          <strong>Aktualizacje</strong>{" "}
-          {status.kind === "latest" && <span className="ok">najnowsza wersja</span>}
-          {info && status.kind !== "error" && <span className="badge">dostępna {info.version}</span>}
+          <strong>{t("update.title")}</strong>{" "}
+          {status.kind === "latest" && <span className="ok">{t("update.latest")}</span>}
+          {info && status.kind !== "error" && <span className="badge">{t("update.available", { version: info.version })}</span>}
           <div className="hint">
-            Zainstalowana wersja: {version}
-            {info?.date && ` · wydanie ${info.version} z ${info.date}`}
+            {t("update.installed", { version })}
+            {info?.date && ` · ${t("update.release", { version: info.version, date: info.date })}`}
           </div>
         </div>
         <div className="actions">
           {status.kind === "available" && (
             <button className="primary" onClick={() => install(status.info)}>
-              Zainstaluj i uruchom ponownie
+              {t("update.install")}
             </button>
           )}
-          {status.kind === "error" && <button onClick={() => openUrl(RELEASES)}>Otwórz stronę wydania</button>}
+          {status.kind === "error" && <button onClick={() => openUrl(RELEASES)}>{t("update.open_release")}</button>}
           {status.kind !== "installing" && status.kind !== "available" && (
             <button disabled={status.kind === "checking"} onClick={check}>
-              {status.kind === "checking" ? "Sprawdzanie…" : "Sprawdź aktualizacje"}
+              {status.kind === "checking" ? t("update.checking") : t("update.check")}
             </button>
           )}
         </div>
@@ -89,7 +91,7 @@ export default function UpdateCard() {
             <span style={{ width: `${Math.round(fraction * 100)}%` }} />
             <em>{status.total > 0 ? `${Math.round(fraction * 100)}%` : formatBytes(status.done)}</em>
           </div>
-          <div className="hint">Pobieranie i instalacja — aplikacja uruchomi się ponownie sama.</div>
+          <div className="hint">{t("update.installing")}</div>
         </>
       )}
       {status.kind === "error" && <div className="error">{status.message}</div>}

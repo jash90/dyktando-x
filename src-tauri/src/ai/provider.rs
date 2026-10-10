@@ -4,6 +4,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use std::time::Duration;
 
+use crate::i18n::{t, t_with};
 use crate::settings::{ProviderId, Settings};
 
 pub const COMPLETION_TIMEOUT: Duration = Duration::from_secs(600);
@@ -38,7 +39,7 @@ impl LlmError {
     }
 
     fn network(e: impl std::fmt::Display) -> Self {
-        Self::retryable(format!("Błąd sieci: {e}"))
+        Self::retryable(t_with("ai.error.network", &[("error", &e)]))
     }
 }
 
@@ -71,14 +72,11 @@ impl LlmConfig {
     /// Full config or a readable error saying what's missing (`api_key` from `ai::keys::get`).
     pub fn from_settings(settings: &Settings, id: ProviderId, api_key: Option<String>) -> Result<Self, LlmError> {
         let Some(api_key) = api_key.filter(|k| !k.is_empty()) else {
-            return Err(LlmError::new(format!(
-                "Brak klucza API dla {} — dodaj go w Ustawieniach → AI.",
-                id.display_name()
-            )));
+            return Err(LlmError::new(t_with("ai.no_key_settings", &[("provider", &id.display_name())])));
         };
         let (model, base_url) = settings.provider(id);
         if model.is_empty() {
-            return Err(LlmError::new(format!("Wybierz model dla {} w Ustawieniach → AI.", id.display_name())));
+            return Err(LlmError::new(t_with("ai.pick_model", &[("provider", &id.display_name())])));
         }
         Ok(Self { provider: id, api_key, model, base_url })
     }
@@ -192,10 +190,10 @@ fn header_map(headers: &Headers) -> Result<reqwest::header::HeaderMap, LlmError>
     let mut map = reqwest::header::HeaderMap::new();
     for (k, v) in headers {
         let name = reqwest::header::HeaderName::from_bytes(k.as_bytes())
-            .map_err(|_| LlmError::new(format!("Niepoprawny nagłówek: {k}")))?;
+            .map_err(|_| LlmError::new(t_with("ai.error.invalid_header", &[("name", &k)])))?;
         // No value in the message — it may be an API key.
         let value = reqwest::header::HeaderValue::from_str(v)
-            .map_err(|_| LlmError::new(format!("Niepoprawna wartość nagłówka {k} — sprawdź klucz API")))?;
+            .map_err(|_| LlmError::new(t_with("ai.error.invalid_header_value", &[("name", &k)])))?;
         map.insert(name, value);
     }
     Ok(map)
@@ -222,7 +220,7 @@ async fn send(
     let client = client(COMPLETION_TIMEOUT)?;
     let headers = header_map(headers)?;
     let payload = serde_json::to_vec(body).map_err(|e| LlmError::new(e.to_string()))?;
-    let mut last = LlmError::new("Brak odpowiedzi");
+    let mut last = LlmError::new(t("ai.error.no_response"));
     for attempt in 0..ATTEMPTS {
         let is_last = attempt + 1 == ATTEMPTS;
         let result = async {
@@ -247,7 +245,7 @@ async fn send(
                 if !error.retryable || is_last {
                     return Err(error);
                 }
-                log::warn!("AI: {} — ponawiam (próba {}/{ATTEMPTS})", error.message, attempt + 2);
+                log::warn!("AI: {} — retrying (attempt {}/{ATTEMPTS})", error.message, attempt + 2);
                 last = error;
                 tokio::time::sleep(delay(attempt, retry_after)).await;
             }
@@ -256,7 +254,7 @@ async fn send(
                 if is_last {
                     return Err(last);
                 }
-                log::warn!("AI: {} — ponawiam (próba {}/{ATTEMPTS})", last.message, attempt + 2);
+                log::warn!("AI: {} — retrying (attempt {}/{ATTEMPTS})", last.message, attempt + 2);
                 tokio::time::sleep(delay(attempt, None)).await;
             }
         }
@@ -273,30 +271,28 @@ pub fn http_error(status: u16, json: &Value, body: &[u8]) -> LlmError {
         .map(str::to_string)
         .unwrap_or_else(|| String::from_utf8_lossy(&body[..body.len().min(300)]).into_owned());
     match status {
-        401 | 403 => LlmError::new(format!("Klucz API odrzucony ({status}): {detail}")),
-        402 => LlmError::new(format!("Brak środków na koncie dostawcy (402): {detail}")),
-        404 => LlmError::new(format!("Nie znaleziono (404) — sprawdź model i adres API: {detail}")),
-        429 => LlmError::retryable(format!("Limit zapytań (429): {detail}")),
-        500..=599 => LlmError::retryable(format!("Błąd serwera dostawcy ({status}): {detail}")),
-        _ => LlmError::new(format!("Błąd {status}: {detail}")),
+        401 | 403 => LlmError::new(t_with("ai.error.key_rejected", &[("status", &status), ("detail", &detail)])),
+        402 => LlmError::new(t_with("ai.error.no_funds", &[("detail", &detail)])),
+        404 => LlmError::new(t_with("ai.error.not_found", &[("detail", &detail)])),
+        429 => LlmError::retryable(t_with("ai.error.rate_limit", &[("detail", &detail)])),
+        500..=599 => LlmError::retryable(t_with("ai.error.server", &[("status", &status), ("detail", &detail)])),
+        _ => LlmError::new(t_with("ai.error.http", &[("status", &status), ("detail", &detail)])),
     }
 }
-
-const LENGTH_LIMIT: &str = "Model skończył się na limicie długości — brak treści";
 
 /// Chat Completions response (OpenAI / OpenRouter / Z.AI).
 pub fn parse_openai(json: &Value) -> Result<String, LlmError> {
     let choice = &json["choices"][0];
     if !choice["message"].is_object() {
-        return Err(LlmError::new("Nieoczekiwana odpowiedź dostawcy (brak choices)"));
+        return Err(LlmError::new(t("ai.error.no_choices")));
     }
     let text = choice["message"]["content"].as_str().unwrap_or("").trim();
     if text.is_empty() {
         let reason = choice["finish_reason"].as_str().unwrap_or("?");
         return Err(LlmError::new(if reason == "length" {
-            LENGTH_LIMIT.to_string()
+            t("ai.error.length_limit")
         } else {
-            format!("Pusta odpowiedź modelu (finish_reason: {reason})")
+            t_with("ai.error.empty_openai", &[("reason", &reason)])
         }));
     }
     Ok(text.to_string())
@@ -307,11 +303,10 @@ pub fn parse_anthropic(json: &Value) -> Result<String, LlmError> {
     let stop_reason = json["stop_reason"].as_str();
     // A refusal arrives as HTTP 200 — we check stop_reason before reading the content.
     if stop_reason == Some("refusal") {
-        let category = json["stop_details"]["category"]
-            .as_str()
-            .map(|c| format!(" (kategoria: {c})"))
-            .unwrap_or_default();
-        return Err(LlmError::new(format!("Model odmówił odpowiedzi{category}")));
+        return Err(LlmError::new(match json["stop_details"]["category"].as_str() {
+            Some(category) => t_with("ai.error.refused_category", &[("category", &category)]),
+            None => t("ai.error.refused"),
+        }));
     }
     let text: String = json["content"]
         .as_array()
@@ -326,9 +321,9 @@ pub fn parse_anthropic(json: &Value) -> Result<String, LlmError> {
     let text = text.trim();
     if text.is_empty() {
         return Err(LlmError::new(if stop_reason == Some("max_tokens") {
-            LENGTH_LIMIT.to_string()
+            t("ai.error.length_limit")
         } else {
-            format!("Pusta odpowiedź modelu (stop_reason: {})", stop_reason.unwrap_or("?"))
+            t_with("ai.error.empty_anthropic", &[("reason", &stop_reason.unwrap_or("?"))])
         }));
     }
     Ok(text.to_string())
@@ -457,9 +452,9 @@ mod tests {
         let c = LlmConfig::from_settings(&s, ProviderId::Anthropic, Some("k".into())).unwrap();
         assert_eq!((c.model.as_str(), c.base_url.as_str()), ("claude-opus-5-5", "https://api.anthropic.com/v1"));
         let e = LlmConfig::from_settings(&s, ProviderId::Anthropic, Some(String::new())).unwrap_err();
-        assert_eq!(e.message, "Brak klucza API dla Anthropic — dodaj go w Ustawieniach → AI.");
+        assert_eq!(e.message, "No API key for Anthropic — add it in Settings → AI.");
         let e = LlmConfig::from_settings(&s, ProviderId::Zai, Some("k".into())).unwrap_err();
-        assert_eq!(e.message, "Wybierz model dla Z.AI (GLM) w Ustawieniach → AI.");
+        assert_eq!(e.message, "Choose a model for Z.AI (GLM) in Settings → AI.");
     }
 
     // Responses
@@ -474,18 +469,18 @@ mod tests {
     #[test]
     fn parse_anthropic_refusal_checked_first() {
         let j = json!({"stop_reason": "refusal", "content": [{"type": "text", "text": "x"}], "stop_details": {"category": "cyber"}});
-        assert_eq!(parse_anthropic(&j).unwrap_err().message, "Model odmówił odpowiedzi (kategoria: cyber)");
+        assert_eq!(parse_anthropic(&j).unwrap_err().message, "The model refused to answer (category: cyber)");
         let j = json!({"stop_reason": "refusal", "content": []});
-        assert_eq!(parse_anthropic(&j).unwrap_err().message, "Model odmówił odpowiedzi");
+        assert_eq!(parse_anthropic(&j).unwrap_err().message, "The model refused to answer");
     }
 
     #[test]
     fn parse_anthropic_empty_and_length() {
         let j = json!({"stop_reason": "max_tokens", "content": [{"type": "text", "text": "  "}]});
-        assert_eq!(parse_anthropic(&j).unwrap_err().message, LENGTH_LIMIT);
+        assert_eq!(parse_anthropic(&j).unwrap_err().message, t("ai.error.length_limit"));
         let j = json!({"stop_reason": "end_turn", "content": []});
-        assert_eq!(parse_anthropic(&j).unwrap_err().message, "Pusta odpowiedź modelu (stop_reason: end_turn)");
-        assert_eq!(parse_anthropic(&json!({})).unwrap_err().message, "Pusta odpowiedź modelu (stop_reason: ?)");
+        assert_eq!(parse_anthropic(&j).unwrap_err().message, "Empty model response (stop_reason: end_turn)");
+        assert_eq!(parse_anthropic(&json!({})).unwrap_err().message, "Empty model response (stop_reason: ?)");
     }
 
     #[test]
@@ -493,10 +488,10 @@ mod tests {
         let j = json!({"choices": [{"message": {"content": " Podsumowanie "}, "finish_reason": "stop"}]});
         assert_eq!(parse_openai(&j).unwrap(), "Podsumowanie");
         let j = json!({"choices": [{"message": {"content": ""}, "finish_reason": "length"}]});
-        assert_eq!(parse_openai(&j).unwrap_err().message, LENGTH_LIMIT);
+        assert_eq!(parse_openai(&j).unwrap_err().message, t("ai.error.length_limit"));
         let j = json!({"choices": [{"message": {"content": null}, "finish_reason": "content_filter"}]});
-        assert_eq!(parse_openai(&j).unwrap_err().message, "Pusta odpowiedź modelu (finish_reason: content_filter)");
-        assert_eq!(parse_openai(&json!({})).unwrap_err().message, "Nieoczekiwana odpowiedź dostawcy (brak choices)");
+        assert_eq!(parse_openai(&j).unwrap_err().message, "Empty model response (finish_reason: content_filter)");
+        assert_eq!(parse_openai(&json!({})).unwrap_err().message, "Unexpected provider response (no choices)");
     }
 
     #[test]
@@ -513,19 +508,19 @@ mod tests {
     fn http_error_mapping() {
         let j = json!({"error": {"message": "invalid x-api-key"}});
         let e = http_error(401, &j, b"");
-        assert_eq!(e.message, "Klucz API odrzucony (401): invalid x-api-key");
+        assert_eq!(e.message, "API key rejected (401): invalid x-api-key");
         assert!(!e.retryable);
-        assert!(http_error(403, &j, b"").message.starts_with("Klucz API odrzucony (403)"));
+        assert!(http_error(403, &j, b"").message.starts_with("API key rejected (403)"));
         let e = http_error(402, &json!({"error": "no money"}), b"");
-        assert_eq!((e.message.as_str(), e.retryable), ("Brak środków na koncie dostawcy (402): no money", false));
+        assert_eq!((e.message.as_str(), e.retryable), ("No funds on the provider account (402): no money", false));
         let e = http_error(404, &json!({"message": "nope"}), b"");
-        assert_eq!(e.message, "Nie znaleziono (404) — sprawdź model i adres API: nope");
+        assert_eq!(e.message, "Not found (404) — check the model and the API URL: nope");
         let e = http_error(429, &j, b"");
-        assert_eq!((e.message.as_str(), e.retryable), ("Limit zapytań (429): invalid x-api-key", true));
+        assert_eq!((e.message.as_str(), e.retryable), ("Rate limit (429): invalid x-api-key", true));
         let e = http_error(529, &json!({}), b"Overloaded");
-        assert_eq!((e.message.as_str(), e.retryable), ("Błąd serwera dostawcy (529): Overloaded", true));
+        assert_eq!((e.message.as_str(), e.retryable), ("Provider server error (529): Overloaded", true));
         let e = http_error(400, &json!({}), &[b'x'; 500]);
-        assert_eq!(e.message, format!("Błąd 400: {}", "x".repeat(300)));
+        assert_eq!(e.message, format!("Error 400: {}", "x".repeat(300)));
         assert!(!e.retryable);
     }
 
@@ -593,7 +588,7 @@ mod tests {
     async fn http401_readable_error_no_retry() {
         let s = stub(vec![(401, "", r#"{"error":{"message":"invalid x-api-key"}}"#)]).await;
         let e = stub_config(ProviderId::Anthropic, &s.base).complete("s", "u", 5).await.unwrap_err();
-        assert!(e.message.contains("Klucz API odrzucony"), "{}", e.message);
+        assert!(e.message.contains("API key rejected"), "{}", e.message);
         let reqs = s.requests.lock().unwrap();
         assert_eq!(reqs.len(), 1);
         assert!(reqs[0].starts_with("POST /v1/messages "));

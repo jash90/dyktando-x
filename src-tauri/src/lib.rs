@@ -8,6 +8,7 @@ mod engine;
 mod focus;
 mod hotkeys;
 mod hud;
+mod i18n;
 mod languages;
 mod logging;
 mod live_window;
@@ -95,6 +96,9 @@ fn save_settings(app: AppHandle, settings: Settings) -> Result<Vec<String>, Stri
     let previous = state.settings.lock().unwrap().clone();
     settings.save().map_err(|e| e.to_string())?;
     *state.settings.lock().unwrap() = settings.clone();
+    if i18n::set(i18n::resolve(&settings.ui_language)) {
+        on_locale_changed(&app);
+    }
     if settings.engine != previous.engine {
         state.dictation.preload(settings.engine);
     }
@@ -107,6 +111,25 @@ fn save_settings(app: AppHandle, settings: Settings) -> Result<Vec<String>, Stri
     }
     let warnings = state.hotkeys.lock().unwrap().as_ref().map(|h| h.warnings.clone()).unwrap_or_default();
     Ok(warnings)
+}
+
+/// The resolved UI language (`"en"` / `"pl"`) — see `i18n::resolve`.
+#[tauri::command]
+fn ui_locale() -> &'static str {
+    i18n::current().code()
+}
+
+/// After the UI language changed: the windows re-render (`ui-locale-changed`), the tray and the
+/// titles of open windows get the new texts.
+fn on_locale_changed(app: &AppHandle) {
+    let _ = app.emit("ui-locale-changed", i18n::current().code());
+    tray::relabel(app);
+    tray::refresh(app);
+    for (label, key) in [("main", "window.settings"), ("meetings", "window.meetings"), (live_window::LABEL, "window.live")] {
+        if let Some(w) = app.get_webview_window(label) {
+            let _ = w.set_title(&i18n::t(key));
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -124,8 +147,8 @@ fn list_input_devices() -> Devices {
 struct ModelInfo {
     id: AssetId,
     key: String,
-    title: &'static str,
-    description: &'static str,
+    title: String,
+    description: String,
     size: u64,
     installed: bool,
     downloading: bool,
@@ -143,8 +166,8 @@ fn list_models(state: tauri::State<AppState>) -> Vec<ModelInfo> {
         .map(|a| ModelInfo {
             id: a.id,
             key: asset_key(a.id),
-            title: a.title,
-            description: a.description,
+            title: a.label(),
+            description: a.description(),
             size: a.total_size(),
             installed: a.is_installed(),
             downloading: downloads.contains_key(&asset_key(a.id)),
@@ -263,7 +286,7 @@ fn start_background(app: &AppHandle) {
     let store = meetings::store::Store::default();
     let recovered = store.recover();
     if !recovered.is_empty() {
-        log::warn!("Odzyskane spotkania po przerwanym nagrywaniu: {recovered:?}");
+        log::warn!("Meetings recovered after an interrupted recording: {recovered:?}");
     }
     // Meeting detection (every 5 s, when enabled in settings).
     let detector_app = app.clone();
@@ -275,7 +298,7 @@ fn start_background(app: &AppHandle) {
             let enabled = state.settings.lock().unwrap().meeting_detection_prompt;
             let active = if enabled { meetings::detector::processes_using_microphone() } else { Vec::new() };
             if let Some(name) = logic.update(&active, state.recorder.is_recording(), enabled) {
-                log::info!("Wykryto spotkanie: {name}");
+                log::info!("Meeting detected: {name}");
                 let handle = detector_app.clone();
                 let name = name.to_string();
                 let _ = detector_app.run_on_main_thread(move || commands::show_meeting_prompt(&handle, &name));
@@ -304,11 +327,11 @@ fn start_background(app: &AppHandle) {
                 let days = state.settings.lock().unwrap().meeting_audio_retention_days;
                 let n = store.apply_retention(days, chrono::Local::now());
                 if n > 0 {
-                    log::info!("Retencja: usunięto audio {n} spotkań starszych niż {days} dni");
+                    log::info!("Retention: deleted the audio of {n} meetings older than {days} days");
                 }
                 let n = dictations::History::default().apply_retention(days, chrono::Local::now());
                 if n > 0 {
-                    log::info!("Retencja: usunięto nagrania {n} dyktowań starszych niż {days} dni");
+                    log::info!("Retention: deleted the recordings of {n} dictations older than {days} days");
                 }
                 last_retention = std::time::Instant::now();
             }
@@ -348,9 +371,9 @@ pub enum Window {
 /// created at startup is pointless and eats WebKit/WebView2 process memory.
 pub fn show_window(app: &AppHandle, which: Window) {
     let (label, url, title, size, min) = match which {
-        Window::Settings => ("main", "index.html".to_string(), "Dyktando X — Ustawienia", (860.0, 620.0), (720.0, 480.0)),
-        Window::SettingsPane(pane) => ("main", format!("index.html#{pane}"), "Dyktando X — Ustawienia", (860.0, 620.0), (720.0, 480.0)),
-        Window::Meetings => ("meetings", "index.html#meetings".to_string(), "Dyktando X — Spotkania", (1040.0, 700.0), (760.0, 480.0)),
+        Window::Settings => ("main", "index.html".to_string(), i18n::t("window.settings"), (860.0, 620.0), (720.0, 480.0)),
+        Window::SettingsPane(pane) => ("main", format!("index.html#{pane}"), i18n::t("window.settings"), (860.0, 620.0), (720.0, 480.0)),
+        Window::Meetings => ("meetings", "index.html#meetings".to_string(), i18n::t("window.meetings"), (1040.0, 700.0), (760.0, 480.0)),
     };
     let window = match app.get_webview_window(label) {
         Some(w) => {
@@ -369,7 +392,7 @@ pub fn show_window(app: &AppHandle, which: Window) {
         {
             Ok(w) => w,
             Err(e) => {
-                log::error!("Okno {label}: {e}");
+                log::error!("Window {label}: {e}");
                 return;
             }
         },
@@ -395,6 +418,7 @@ fn autostart_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
 pub fn run() {
     logging::init();
     let settings = Settings::load();
+    i18n::set(i18n::resolve(&settings.ui_language));
     tauri::Builder::default()
         // Relaunching (double-click in Finder / Start menu) opens settings of the running instance.
         // `--meetings` opens the meetings window (e.g. from a system shortcut).
@@ -424,6 +448,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_settings,
             save_settings,
+            ui_locale,
             list_input_devices,
             list_models,
             download_model,
@@ -502,7 +527,7 @@ pub fn run() {
             }
         })
         .build(tauri::generate_context!())
-        .expect("błąd uruchamiania Dyktando X")
+        .expect("error while starting Dyktando X")
         .run(|app, event| {
             // macOS: double-clicking a running app in Finder / Spotlight doesn't start a second
             // instance, it only sends "reopen" — then we show settings.

@@ -119,7 +119,7 @@ impl Silero {
         let get = |name: &str| -> Result<Vec<f32>> {
             Ok(outputs
                 .get(name)
-                .ok_or_else(|| anyhow!("VAD: brak wyjścia {name}"))?
+                .ok_or_else(|| anyhow!(crate::i18n::t_with("model.vad_no_output", &[("name", &name)])))?
                 .try_extract_array::<f32>()
                 .map_err(|e| err(&e))?
                 .iter()
@@ -151,7 +151,7 @@ pub fn track_probabilities(model: &Path, dir: &Path, prefix: &str, cancel: &dyn 
     let mut silent = 0usize;
     writer::read_track(dir, prefix, 60, |_, chunk| {
         if cancel() {
-            return Err(anyhow!("Przerwano"));
+            return Err(anyhow!(super::CANCELLED));
         }
         carry.extend_from_slice(chunk);
         let whole = carry.len() / FRAME * FRAME;

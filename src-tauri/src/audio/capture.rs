@@ -9,6 +9,7 @@ use std::sync::{mpsc, Arc};
 use std::thread::JoinHandle;
 
 use super::resample::downmix;
+use crate::i18n::t;
 
 /// Receiver of mono samples at the device's native rate (called from the audio thread — be quick!).
 pub type Sink = Box<dyn FnMut(&[f32]) + Send + 'static>;
@@ -35,9 +36,9 @@ fn find_device(name: Option<&str>) -> Result<cpal::Device> {
                 return Ok(d);
             }
         }
-        log::warn!("Mikrofon „{name}” niedostępny — używam domyślnego");
+        log::warn!("Microphone “{name}” unavailable — using the default one");
     }
-    host.default_input_device().ok_or_else(|| anyhow!("Brak mikrofonu w systemie"))
+    host.default_input_device().ok_or_else(|| anyhow!(t("mic.none")))
 }
 
 pub struct InputCapture {
@@ -62,9 +63,9 @@ impl InputCapture {
                 let started = (|| -> Result<(cpal::Stream, u32, String)> {
                     let dev = find_device(device.as_deref())?;
                     let name = dev.to_string();
-                    let cfg = dev.default_input_config().context("konfiguracja mikrofonu")?;
+                    let cfg = dev.default_input_config().with_context(|| t("mic.config"))?;
                     let stream = build(&dev, cfg.sample_format(), cfg.config(), sink, on_error)?;
-                    stream.play().context("start mikrofonu")?;
+                    stream.play().with_context(|| t("mic.start"))?;
                     Ok((stream, cfg.sample_rate(), name))
                 })();
                 match started {
@@ -80,7 +81,7 @@ impl InputCapture {
             })?;
         let (sample_rate, device_name) = ready_rx
             .recv()
-            .map_err(|_| anyhow!("wątek mikrofonu zakończył się"))??;
+            .map_err(|_| anyhow!(t("mic.thread_ended")))??;
         Ok(Self { stop: Some(stop_tx), thread: Some(thread), sample_rate, device_name, failed })
     }
 
@@ -117,7 +118,7 @@ fn build(dev: &cpal::Device, format: SampleFormat, config: cpal::StreamConfig, s
         SampleFormat::I8 => typed::<i8>(dev, config, sink, failed),
         SampleFormat::U8 => typed::<u8>(dev, config, sink, failed),
         SampleFormat::F64 => typed::<f64>(dev, config, sink, failed),
-        other => Err(anyhow!("Nieobsługiwany format próbek mikrofonu: {other:?}")),
+        other => Err(anyhow!(crate::i18n::t_with("mic.unsupported_format", &[("format", &format!("{other:?}"))]))),
     }
 }
 
@@ -141,11 +142,11 @@ where
                 }
             },
             move |e| {
-                log::error!("strumień mikrofonu: {e}");
+                log::error!("microphone stream: {e}");
                 failed.store(true, Ordering::Relaxed);
             },
             None,
         )
-        .context("otwieranie mikrofonu")?;
+        .with_context(|| t("mic.open"))?;
     Ok(stream)
 }
