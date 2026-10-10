@@ -68,7 +68,9 @@ Artifacts land in `out/release/vX.Y.Z/` (gitignored).
 5. **Windows x64:** `tauri build --runner cargo-xwin --target x86_64-pc-windows-msvc --bundles nsis`.
    Only the NSIS installer is built: MSI needs WiX, which runs only on Windows, and the updater
    prefers NSIS anyway. The installer is not Authenticode-signed (same as before), so SmartScreen
-   warns on first install.
+   warns on first install. With `--windows-gh` the GitHub runner builds both the NSIS installer and
+   the MSI; both are downloaded, their signatures verified, and the MSI is published under the
+   `windows-x86_64-msi` key so installs made from an earlier MSI keep updating from an MSI.
 6. **Updater:** every updater artifact's `.sig` is verified against the public key from
    `tauri.conf.json` (`scripts/lib/verify-minisign.mjs`), then `latest.json` is written with the
    same platform keys tauri-action used (`darwin-aarch64[-app]`, `linux-x86_64[-appimage|-deb|-rpm]`,
