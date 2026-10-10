@@ -315,9 +315,13 @@ build_windows_gh() {
   done
   [[ "$run_id" != "$before" ]] || die "workflow run did not start"
   gh run watch "$run_id" --exit-status
-  gh release download "$TAG" -D "$OUT" --clobber -p '*-setup.exe' -p '*-setup.exe.sig'
+  gh release download "$TAG" -D "$OUT" --clobber -p '*-setup.exe' -p '*-setup.exe.sig' \
+    -p '*.msi' -p '*.msi.sig'
   WINDOWS_EXE="$(cd "$OUT" && ls *-setup.exe)"
   verify_sig "$OUT/$WINDOWS_EXE"
+  # The GitHub runner also builds the MSI (WiX); installs made from it update via windows-x86_64-msi.
+  WINDOWS_MSI="$(cd "$OUT" && ls *.msi 2>/dev/null | head -1)" || true
+  if [[ -n "$WINDOWS_MSI" ]]; then verify_sig "$OUT/$WINDOWS_MSI"; fi
 }
 
 # ---------------------------------------------------------------------------- latest.json
@@ -343,6 +347,7 @@ write_latest_json() {
     add linux-x86_64-deb "$LINUX_DEB"; add linux-x86_64-rpm "$LINUX_RPM"
   fi
   if [[ -n "${WINDOWS_EXE:-}" ]]; then add windows-x86_64 "$WINDOWS_EXE"; add windows-x86_64-nsis "$WINDOWS_EXE"; fi
+  if [[ -n "${WINDOWS_MSI:-}" ]]; then add windows-x86_64-msi "$WINDOWS_MSI"; fi
 
   # A partial run (e.g. only --mac) into an existing draft keeps the other platforms.
   if [[ $RESUME -eq 1 && $DRY_RUN -eq 0 ]]; then
