@@ -130,14 +130,14 @@ preflight() {
     # shellcheck disable=SC1090
     source "$apple_env"
     : "${APPLE_ID:?}" "${APPLE_TEAM_ID:?}" "${APPLE_SIGNING_IDENTITY:?}" "${NOTARY_PROFILE:?}"
-    security find-identity -v -p codesigning | grep -q "$APPLE_SIGNING_IDENTITY" \
+    grep -q "$APPLE_SIGNING_IDENTITY" <<<"$(security find-identity -v -p codesigning)" \
       || die "signing identity $APPLE_SIGNING_IDENTITY not found in the keychain"
     security find-generic-password -s local-release-apple-password >/dev/null 2>&1 \
       || die "keychain item local-release-apple-password not found"
-    rustup target list --installed | grep -qx aarch64-apple-darwin || die "rustup target aarch64-apple-darwin missing"
+    grep -qx aarch64-apple-darwin <<<"$(rustup target list --installed)" || die "rustup target aarch64-apple-darwin missing"
   fi
   if [[ $DO_WINDOWS -eq 1 && $WINDOWS_GH -eq 0 ]]; then
-    rustup target list --installed | grep -qx x86_64-pc-windows-msvc || die "rustup target x86_64-pc-windows-msvc missing"
+    grep -qx x86_64-pc-windows-msvc <<<"$(rustup target list --installed)" || die "rustup target x86_64-pc-windows-msvc missing"
     [[ -x /opt/homebrew/opt/llvm/bin/clang-cl ]] || command -v clang-cl >/dev/null || die "clang-cl not found (brew install llvm)"
   fi
   if [[ $DO_LINUX -eq 1 ]]; then
@@ -216,8 +216,9 @@ verify_app() {
   codesign --verify --deep --strict --verbose=2 "$app"
   spctl -a -vv -t exec "$app"
   xcrun stapler validate "$app"
-  codesign -dv "$app" 2>&1 | grep -q "^TeamIdentifier=$APPLE_TEAM_ID$" \
-    || die "$app is not signed by team $APPLE_TEAM_ID"
+  local details
+  details="$(codesign -dv "$app" 2>&1)"
+  grep -qx "TeamIdentifier=$APPLE_TEAM_ID" <<<"$details" || die "$app is not signed by team $APPLE_TEAM_ID"
 }
 
 # ---------------------------------------------------------------------------- Linux
