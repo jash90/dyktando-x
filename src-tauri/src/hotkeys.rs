@@ -13,6 +13,8 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
+use crate::i18n::{t, t_with};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
     PushToTalkDown,
@@ -52,7 +54,7 @@ pub fn parse(s: &str) -> Result<Option<Hotkey>> {
     if s.is_empty() {
         return Ok(None);
     }
-    s.parse::<Hotkey>().map(Some).map_err(|e| anyhow!("Nieprawidłowy skrót „{s}”: {e}"))
+    s.parse::<Hotkey>().map(Some).map_err(|e| anyhow!(t_with("hotkeys.invalid", &[("shortcut", &s), ("error", &e)])))
 }
 
 pub fn parse_modifier(s: &str) -> Result<Option<Modifiers>> {
@@ -60,9 +62,9 @@ pub fn parse_modifier(s: &str) -> Result<Option<Modifiers>> {
     if s.is_empty() {
         return Ok(None);
     }
-    let hk = parse(s)?.expect("niepusty");
+    let hk = parse(s)?.expect("non-empty");
     if hk.key.is_some() || hk.modifiers.bits().count_ones() != 1 {
-        return Err(anyhow!("„{s}” to nie jest pojedynczy modyfikator (np. CmdRight, CtrlRight)"));
+        return Err(anyhow!(t_with("hotkeys.not_single_modifier", &[("shortcut", &s)])));
     }
     Ok(Some(hk.modifiers))
 }
@@ -88,7 +90,7 @@ impl Hotkeys {
 
         if !bindings.is_empty() {
             let manager = HotkeyManager::new_with_blocking().or_else(|e| {
-                log::warn!("Skróty bez blokowania: {e}");
+                log::warn!("Shortcuts without key blocking: {e}");
                 HotkeyManager::new()
             });
             match manager {
@@ -99,7 +101,7 @@ impl Hotkeys {
                             Ok(id) => {
                                 ids.insert(id, kind);
                             }
-                            Err(e) => warnings.push(format!("Skrót {hk}: {e}")),
+                            Err(e) => warnings.push(t_with("hotkeys.register_failed", &[("shortcut", &hk), ("error", &e)])),
                         }
                     }
                     let stop = stop.clone();
@@ -151,11 +153,11 @@ impl Hotkeys {
 fn permission_hint(err: &str) -> String {
     if cfg!(target_os = "macos") {
         let _ = err;
-        "Skróty globalne wymagają uprawnienia Dostępność: zakładka Uprawnienia → „Otwórz ustawienia”, włącz Dyktando X, potem „Sprawdź ponownie”.".to_string()
+        t("hotkeys.needs_accessibility")
     } else if cfg!(target_os = "linux") {
-        format!("Skróty globalne wymagają dostępu do /dev/input — dodaj regułę udev albo grupę „input” ({err})")
+        t_with("hotkeys.needs_input_group", &[("error", &err)])
     } else {
-        format!("Skróty globalne niedostępne: {err}")
+        t_with("hotkeys.unavailable", &[("error", &err)])
     }
 }
 

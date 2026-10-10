@@ -24,7 +24,7 @@ pub fn init() {
     let _ = builder.try_init();
     match opened {
         Ok(_) => log::info!("Dyktando X {} ({}), log: {}", env!("CARGO_PKG_VERSION"), std::env::consts::OS, path.display()),
-        Err(e) => log::warn!("Log tylko na konsoli — {}: {e}", path.display()),
+        Err(e) => log::warn!("Logging to the console only — {}: {e}", path.display()),
     }
 }
 

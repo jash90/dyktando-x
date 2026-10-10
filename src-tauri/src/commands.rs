@@ -5,6 +5,7 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use crate::ai::{keys, provider::LlmConfig, summarizer};
 use crate::dictation::{emit as hud_emit, HudState};
+use crate::i18n::{t, t_with};
 use crate::meetings::live;
 use crate::meetings::processing::{self, JobEvent};
 use crate::meetings::recorder::RecordingStatus;
@@ -56,7 +57,7 @@ pub fn start_meeting_inner(app: &AppHandle) -> Result<Meeting, String> {
         crate::live_window::show(app);
     }
     if settings.meeting_consent_reminder {
-        hud_emit(app, HudState::Info { message: "Nagrywam spotkanie — pamiętaj, żeby poinformować rozmówców.".into() });
+        hud_emit(app, HudState::Info { message: t("hud.consent_reminder") });
     }
     changed(app);
     Ok(meeting)
@@ -66,7 +67,7 @@ pub fn stop_meeting_inner(app: &AppHandle) -> Result<Meeting, String> {
     let state = app.state::<AppState>();
     let meeting = state.recorder.stop(&store()).map_err(|e| e.to_string())?;
     crate::live_window::hide(app);
-    hud_emit(app, HudState::Info { message: format!("Nagranie zapisane ({})", crate::meetings::transcript::clock(meeting.duration_seconds)) });
+    hud_emit(app, HudState::Info { message: t_with("hud.meeting_saved", &[("duration", &crate::meetings::transcript::clock(meeting.duration_seconds))]) });
     changed(app);
     processing::after_recording(app.clone(), meeting.id.clone());
     Ok(meeting)
@@ -168,7 +169,7 @@ fn exportable_tracks(s: &Store, m: &Meeting) -> Vec<Track> {
 #[tauri::command]
 pub fn get_meeting(id: String) -> Result<MeetingDetail, String> {
     let s = store();
-    let meeting = s.load(&id).ok_or("Brak spotkania")?;
+    let meeting = s.load(&id).ok_or_else(|| t("meeting.not_found"))?;
     let summaries = s
         .summaries(&id)
         .into_iter()
@@ -190,10 +191,10 @@ pub fn rename_meeting(app: AppHandle, id: String, title: String) -> Result<(), S
 pub fn delete_meeting(app: AppHandle, id: String) -> Result<(), String> {
     let state = app.state::<AppState>();
     if state.recorder.status().meeting_id.as_deref() == Some(id.as_str()) {
-        return Err("Najpierw zatrzymaj nagrywanie".into());
+        return Err(t("meeting.stop_recording_first"));
     }
     if state.jobs.current().is_some_and(|j| j.meeting_id == id) {
-        return Err("To spotkanie jest właśnie przetwarzane".into());
+        return Err(t("meeting.being_processed"));
     }
     store().delete(&id).map_err(|e| e.to_string())?;
     changed(&app);
@@ -214,24 +215,24 @@ pub fn reveal_meeting(app: AppHandle, id: String) -> Result<(), String> {
 pub async fn export_meeting_audio(app: AppHandle, id: String, track: AudioExport) -> Result<Option<String>, String> {
     use tauri_plugin_dialog::DialogExt;
     let s = store();
-    let meeting = s.load(&id).ok_or("Brak spotkania")?;
+    let meeting = s.load(&id).ok_or_else(|| t("meeting.not_found"))?;
     if meeting.audio_in_progress() {
-        return Err("Poczekaj, aż nagranie się zakończy".into());
+        return Err(t("meeting.wait_for_recording"));
     }
     let available = exportable_tracks(&s, &meeting);
     if !track.tracks().iter().all(|t| available.contains(t)) {
-        return Err("Brak nagrania tej ścieżki".into());
+        return Err(t("meeting.no_track"));
     }
-    let (title, suffix) = match track {
-        AudioExport::Mic => ("Zapisz moją ścieżkę", "ja"),
-        AudioExport::System => ("Zapisz ścieżkę rozmówców", "rozmowcy"),
-        AudioExport::Mixed => ("Zapisz całe nagranie", "calosc"),
+    let (title, file_name) = match track {
+        AudioExport::Mic => ("dialog.save_mic_track", "export.file_mic"),
+        AudioExport::System => ("dialog.save_system_track", "export.file_system"),
+        AudioExport::Mixed => ("dialog.save_mixed", "export.file_mixed"),
     };
     let picked = app
         .dialog()
         .file()
-        .set_title(title)
-        .set_file_name(format!("{id}-{suffix}.wav"))
+        .set_title(t(title))
+        .set_file_name(t_with(file_name, &[("id", &id)]))
         .add_filter("WAV", &["wav"])
         .blocking_save_file();
     let Some(file) = picked else { return Ok(None) };
@@ -253,8 +254,8 @@ pub async fn import_meeting(app: AppHandle) -> Result<Option<Meeting>, String> {
     let picked = app
         .dialog()
         .file()
-        .set_title("Wybierz nagranie rozmowy")
-        .add_filter("Nagrania audio", crate::meetings::import::EXTENSIONS)
+        .set_title(t("dialog.pick_recording"))
+        .add_filter(t("dialog.audio_filter"), crate::meetings::import::EXTENSIONS)
         .blocking_pick_file();
     let Some(file) = picked else { return Ok(None) };
     let path = file.into_path().map_err(|e| e.to_string())?;
@@ -292,7 +293,7 @@ pub struct ProviderInfo {
     has_key: bool,
     default_base_url: &'static str,
     default_model: &'static str,
-    model_placeholder: &'static str,
+    model_placeholder: String,
 }
 
 #[tauri::command]
@@ -320,7 +321,7 @@ pub fn set_ai_key(provider: ProviderId, key: String) -> Result<(), String> {
 #[tauri::command]
 pub async fn test_ai(app: AppHandle, provider: ProviderId) -> Result<Vec<String>, String> {
     let settings = app.state::<AppState>().settings.lock().unwrap().clone();
-    let key = keys::get(provider).ok_or_else(|| format!("Brak klucza API dla {}", provider.display_name()))?;
+    let key = keys::get(provider).ok_or_else(|| t_with("ai.no_key", &[("provider", &provider.display_name())]))?;
     let (model, base_url) = settings.provider(provider);
     let config = LlmConfig { provider, api_key: key, model, base_url };
     config.list_models().await.map_err(|e| e.message)

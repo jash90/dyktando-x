@@ -1,0 +1,3 @@
+/* Permission prompts (Polish). */
+NSMicrophoneUsageDescription = "Dyktando X nagrywa mikrofon, żeby zamienić mowę na tekst. Nagrania są przetwarzane lokalnie.";
+NSAudioCaptureUsageDescription = "Dyktando X nagrywa dźwięk aplikacji do spotkań (np. Zoom, Meet), żeby przepisać wypowiedzi rozmówców.";

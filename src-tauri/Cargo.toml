@@ -54,6 +54,7 @@ symphonia = { version = "0.6.1", features = ["mp3", "aac", "isomp4", "alac", "ai
 tauri-plugin-autostart = "2.7.0"
 tauri-plugin-updater = "2"
 symphonia-adapter-libopus = "0.3.0"
+sys-locale = "0.3.2"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

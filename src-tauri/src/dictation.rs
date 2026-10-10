@@ -93,7 +93,7 @@ impl Dictation {
             return;
         }
         if !settings.engine.asset().is_installed() {
-            emit(app, HudState::Error { message: format!("Najpierw pobierz model {} w Ustawieniach", settings.engine.asset().title) });
+            emit(app, HudState::Error { message: crate::i18n::t_with("dictation.download_model_first", &[("model", &settings.engine.asset().label())]) });
             return;
         }
         let buffer = Arc::new(Mutex::new(Vec::<f32>::with_capacity(48_000 * 30)));
@@ -107,14 +107,14 @@ impl Dictation {
         });
         match InputCapture::start(settings.input_device.as_deref(), sink) {
             Ok(capture) => {
-                log::info!("Nagrywanie: {} @ {} Hz", capture.device_name, capture.sample_rate);
+                log::info!("Recording: {} @ {} Hz", capture.device_name, capture.sample_rate);
                 let started = Instant::now();
                 *phase = Phase::Recording { capture, buffer, started };
                 self.recording.store(true, Ordering::Relaxed);
                 emit(app, HudState::Recording { level: 0.0, seconds: 0.0 });
                 self.spawn_level_ticker(app.clone(), started);
             }
-            Err(e) => emit(app, HudState::Error { message: format!("Mikrofon: {e}") }),
+            Err(e) => emit(app, HudState::Error { message: crate::i18n::t_with("mic.error", &[("error", &e)]) }),
         }
     }
 
@@ -206,9 +206,7 @@ fn transcribe_and_insert(
     settings: &Settings,
 ) -> Result<Option<Done>> {
     if audio::is_digital_silence(samples) {
-        return Err(anyhow!(
-            "Mikrofon nagrał cyfrową ciszę — system nie dał dostępu do mikrofonu. Sprawdź uprawnienia w ustawieniach prywatności."
-        ));
+        return Err(anyhow!(crate::i18n::t("dictation.digital_silence")));
     }
     let audio16 = resample::to_16k(samples, rate)?;
     let t0 = Instant::now();
@@ -218,12 +216,12 @@ fn transcribe_and_insert(
             *guard = None;
             *guard = Some((settings.engine, Engine::load(settings.engine)?));
         }
-        let (_, e) = guard.as_mut().expect("silnik wczytany");
+        let (_, e) = guard.as_mut().expect("engine loaded");
         e.set_vocabulary(&settings.vocabulary);
         e.transcribe(&audio16, settings.language)?
     };
     log::info!(
-        "Transkrypcja {:.1} s audio w {:.2} s: {raw:?}",
+        "Transcribed {:.1} s of audio in {:.2} s: {raw:?}",
         audio16.len() as f32 / 16_000.0,
         t0.elapsed().as_secs_f32()
     );

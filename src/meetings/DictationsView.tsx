@@ -3,21 +3,23 @@ import { listen } from "@tauri-apps/api/event";
 import { Copy, Download, Mic, Trash2, Wand2 } from "lucide-react";
 import { api, clock, dictationsApi, ENGINE_LABELS, type DictationEntry, type EngineId, type LanguageInfo, type Settings } from "../api";
 import LanguagePicker, { languageCheck } from "./LanguagePicker";
+import { intlLocale, tn, useT } from "../i18n";
 
-const DAY = new Intl.DateTimeFormat("pl-PL", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
-const TIME = new Intl.DateTimeFormat("pl-PL", { hour: "2-digit", minute: "2-digit" });
-
-/** Polish plural forms: „1 dyktowanie”, „3 dyktowania”, „5 dyktowań”, „22 dyktowania”. */
+/** "1 dictation" / "5 dictations"; Polish: „1 dyktowanie”, „3 dyktowania”, „5 dyktowań”, „22 dyktowania”. */
 export function countLabel(n: number): string {
-  const tens = n % 100;
-  const ones = n % 10;
-  if (n === 1) return "1 dyktowanie";
-  if (ones >= 2 && ones <= 4 && (tens < 12 || tens > 14)) return `${n} dyktowania`;
-  return `${n} dyktowań`;
+  return tn("dictations.count", n);
 }
 
 /** Dictation history: entries newest first, grouped by day, with re-transcription. */
 export default function DictationsView({ query, onError }: { query: string; onError: (e: string | null) => void }) {
+  const { t, locale } = useT();
+  const [DAY, TIME] = useMemo(
+    () => [
+      new Intl.DateTimeFormat(intlLocale(), { weekday: "long", day: "numeric", month: "long", year: "numeric" }),
+      new Intl.DateTimeFormat(intlLocale(), { hour: "2-digit", minute: "2-digit" }),
+    ],
+    [locale], // eslint-disable-line react-hooks/exhaustive-deps
+  );
   const [entries, setEntries] = useState<DictationEntry[]>([]);
   const [engine, setEngine] = useState<EngineId | null>(null);
   const [languages, setLanguages] = useState<string[]>([]);
@@ -54,7 +56,7 @@ export default function DictationsView({ query, onError }: { query: string; onEr
       groups[groups.length - 1][1].push(e);
     }
     return groups;
-  }, [shown]);
+  }, [shown, DAY]);
 
   const status = languageCheck(engine, languages, allLanguages);
 
@@ -83,7 +85,7 @@ export default function DictationsView({ query, onError }: { query: string; onEr
     return (
       <div className="empty">
         <Mic size={40} strokeWidth={1.5} />
-        <p>Tu pojawi się każde dyktowanie: tekst i nagranie. Gdy coś wyjdzie źle, przepiszesz je ponownie innym modelem albo w innym języku.</p>
+        <p>{t("dictations.empty")}</p>
       </div>
     );
   }
@@ -91,14 +93,14 @@ export default function DictationsView({ query, onError }: { query: string; onEr
   return (
     <section className="detail dictations">
       <header className="detail-head">
-        <h1>Dyktowania</h1>
+        <h1>{t("dictations.title")}</h1>
         <div className="hint">
-          {countLabel(entries.length)} · nagrania są usuwane razem z nagraniami spotkań (ustawienia), tekst zostaje
+          {countLabel(entries.length)} · {t("dictations.retention_note")}
         </div>
       </header>
       <div className="toolbar">
         <div className="group">
-          <span className="hint">Przepisuj ponownie:</span>
+          <span className="hint">{t("dictations.retranscribe_with")}</span>
           <select value={engine ?? ""} onChange={(e) => setEngine(e.target.value as EngineId)}>
             {(Object.keys(ENGINE_LABELS) as EngineId[]).map((id) => (
               <option key={id} value={id}>
@@ -110,7 +112,7 @@ export default function DictationsView({ query, onError }: { query: string; onEr
         </div>
       </div>
       {(status.error || status.warning) && <div className="lang-status error">{status.error ?? status.warning}</div>}
-      {shown.length === 0 && <div className="hint">Nic nie pasuje do wyszukiwania.</div>}
+      {shown.length === 0 && <div className="hint">{t("dictations.no_match")}</div>}
       {days.map(([day, list]) => (
         <div key={day} className="dict-day">
           <h2>{day}</h2>
@@ -118,22 +120,22 @@ export default function DictationsView({ query, onError }: { query: string; onEr
             <article key={e.id} className="dict-entry">
               <time className="dict-time">{TIME.format(new Date(e.createdAt))}</time>
               <div className="dict-body">
-                <p className="dict-text">{retranscribing === e.id ? "Przepisywanie…" : e.text}</p>
+                <p className="dict-text">{retranscribing === e.id ? t("dictations.retranscribing") : e.text}</p>
                 <div className="dict-meta">
                   {clock(e.durationSeconds)} · {e.engine}
-                  {e.pasted ? "" : " · tylko do schowka"}
-                  {e.audioDeleted ? " · nagranie usunięte" : ""}
+                  {e.pasted ? "" : ` · ${t("dictations.clipboard_only")}`}
+                  {e.audioDeleted ? ` · ${t("dictations.audio_deleted")}` : ""}
                 </div>
               </div>
               <div className="dict-actions">
-                <button className="icon" title="Kopiuj tekst" aria-label="Kopiuj tekst" onClick={() => copy(e)}>
-                  <Copy size={15} /> {copied === e.id && <span className="hint">skopiowano</span>}
+                <button className="icon" title={t("dictations.copy")} aria-label={t("dictations.copy")} onClick={() => copy(e)}>
+                  <Copy size={15} /> {copied === e.id && <span className="hint">{t("dictations.copied")}</span>}
                 </button>
                 <button
                   className="icon"
                   disabled={e.audioDeleted || !!retranscribing || !engine || !!status.error}
-                  title={e.audioDeleted ? "Nagranie zostało usunięte" : (status.error ?? "Przepisz ponownie wybranym modelem i językiem")}
-                  aria-label="Przepisz ponownie"
+                  title={e.audioDeleted ? t("dictations.audio_was_deleted") : (status.error ?? t("common.retranscribe_hint"))}
+                  aria-label={t("dictations.retranscribe")}
                   onClick={() => engine && retranscribe(e.id, engine)}
                 >
                   <Wand2 size={15} />
@@ -141,17 +143,17 @@ export default function DictationsView({ query, onError }: { query: string; onEr
                 <button
                   className="icon"
                   disabled={e.audioDeleted}
-                  title="Pobierz nagranie (WAV)"
-                  aria-label="Pobierz nagranie"
+                  title={t("common.download_wav")}
+                  aria-label={t("dictations.download")}
                   onClick={() => act(() => dictationsApi.exportAudio(e.id))}
                 >
                   <Download size={15} />
                 </button>
                 <button
                   className="icon danger"
-                  title="Usuń dyktowanie"
-                  aria-label="Usuń dyktowanie"
-                  onClick={() => confirm("Usunąć to dyktowanie razem z nagraniem?") && act(() => dictationsApi.remove(e.id))}
+                  title={t("dictations.delete")}
+                  aria-label={t("dictations.delete")}
+                  onClick={() => confirm(t("dictations.confirm_delete")) && act(() => dictationsApi.remove(e.id))}
                 >
                   <Trash2 size={15} />
                 </button>

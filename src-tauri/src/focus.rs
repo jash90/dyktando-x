@@ -71,7 +71,7 @@ pub fn snapshot() -> Snapshot {
 pub fn should_paste() -> bool {
     let s = snapshot();
     let f = classify(&s);
-    log::info!("Fokus: {f:?} ({:?} w {:?})", s.role, s.app);
+    log::info!("Focus: {f:?} ({:?} in {:?})", s.role, s.app);
     f != Focus::NotEditable
 }
 

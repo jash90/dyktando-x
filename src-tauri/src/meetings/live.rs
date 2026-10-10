@@ -15,6 +15,7 @@ use std::time::{Duration, Instant};
 use super::transcript::{Track, Utterance, ME, OTHERS};
 use super::vad::{Silero, FRAME, FRAME_SECONDS};
 use crate::engine::Engine;
+use crate::i18n;
 use crate::models::{self, AssetId, EngineId};
 use crate::settings::Language;
 
@@ -276,7 +277,7 @@ fn run(engine: &mut Engine, samples: &[f32], language: Language, translate_to: O
         Ok(text) if !super::transcriber::is_noise(&text, samples.len() as f64 / 16_000.0) => text,
         Ok(_) => return (None, None),
         Err(e) => {
-            log::warn!("transkrypcja na żywo: {e}");
+            log::warn!("live transcription: {e}");
             return (None, None);
         }
     };
@@ -285,7 +286,7 @@ fn run(engine: &mut Engine, samples: &[f32], language: Language, translate_to: O
         Ok(tr) if !tr.is_empty() => Some(tr),
         Ok(_) => None,
         Err(e) => {
-            log::warn!("tłumaczenie na żywo: {e}");
+            log::warn!("live translation: {e}");
             None
         }
     });
@@ -310,14 +311,14 @@ impl Live {
         let engine_id = config.effective_engine();
         for needed in [vad, engine_id.asset()] {
             if !needed.is_installed() {
-                return Err(anyhow!("Brak modelu {} — pobierz go w Ustawieniach → Modele", needed.title));
+                return Err(anyhow!(i18n::t_with("model.missing", &[("model", &needed.label())])));
             }
         }
         let translate_to = config.translate_to.clone().filter(|t| !t.is_empty());
         if let Some(t) = &translate_to {
             let source = config.language.code().unwrap_or("pl");
             if !(source != t && (source == "en" || t == "en")) {
-                return Err(anyhow!("Canary tłumaczy tylko między angielskim a innymi językami (ustawiony język: {source}, docelowy: {t})"));
+                return Err(anyhow!(i18n::t_with("engine.canary_translation", &[("source", &source), ("target", t)])));
             }
         }
         let (tx, rx) = mpsc::channel::<Msg>();
@@ -337,7 +338,7 @@ impl Live {
             let (mut mic, mut system, mut engine) = match loaded {
                 Ok(x) => x,
                 Err(e) => {
-                    log::error!("transkrypcja na żywo: {e}");
+                    log::error!("live transcription: {e}");
                     listener(Event::Error(e.to_string()));
                     for _ in rx {} // recording continues, just without live text
                     return;
@@ -373,7 +374,7 @@ impl Live {
                         let seg = if track == Track::Mic { &mut mic } else { &mut system };
                         match seg.push(&samples) {
                             Ok(segments) => segments.into_iter().for_each(|s| finalize(s, track, &mut engine, &mut drafts, &mut last_run)),
-                            Err(e) => log::warn!("VAD na żywo: {e}"),
+                            Err(e) => log::warn!("live VAD: {e}"),
                         }
                         // Draft text of the ongoing utterance — we don't wait for a pause.
                         let waiting = backlog.load(Ordering::Relaxed);
@@ -623,6 +624,6 @@ mod tests {
     fn translation_requires_english_on_one_side() {
         let bad = Config { engine: EngineId::ParakeetV3, language: Language::Pl, translate_to: Some("de".into()), vocabulary: String::new() };
         let err = Live::start(bad, Box::new(|_| {})).err().map(|e| e.to_string()).unwrap_or_default();
-        assert!(err.contains("angielskim") || err.contains("Brak modelu"), "{err}");
+        assert!(err.contains("English") || err.contains("is missing"), "{err}");
     }
 }

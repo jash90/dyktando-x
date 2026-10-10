@@ -2,8 +2,10 @@ import { useEffect, useState } from "react";
 import { Check, KeyRound, Plug } from "lucide-react";
 import type { PaneProps } from "./SettingsApp";
 import { aiApi, type ProviderId, type ProviderInfo } from "../api";
+import { useT } from "../i18n";
 
 export default function AiPane({ settings, update, env }: PaneProps) {
+  const { t, tn } = useT();
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [keys, setKeys] = useState<Record<string, string>>({});
   const [models, setModels] = useState<Record<string, string[]>>({});
@@ -13,7 +15,7 @@ export default function AiPane({ settings, update, env }: PaneProps) {
 
   const importLegacy = async () => {
     const names = await aiApi.importLegacy();
-    setImportMsg(names.length ? `Zaimportowano klucze: ${names.join(", ")}` : "Nie znaleziono nowych kluczy w Dyktando dla macOS");
+    setImportMsg(names.length ? t("ai.imported", { names: names.join(", ") }) : t("ai.import_none"));
     refresh();
   };
 
@@ -31,7 +33,7 @@ export default function AiPane({ settings, update, env }: PaneProps) {
     try {
       await aiApi.setKey(id, keys[id] ?? "");
       setKeys((k) => ({ ...k, [id]: "" }));
-      setMsg((m) => ({ ...m, [id]: { ok: true, text: (keys[id] ?? "").trim() ? "Klucz zapisany w systemowym magazynie haseł" : "Klucz usunięty" } }));
+      setMsg((m) => ({ ...m, [id]: { ok: true, text: (keys[id] ?? "").trim() ? t("ai.key_saved_msg") : t("ai.key_removed") } }));
       refresh();
     } catch (e) {
       setMsg((m) => ({ ...m, [id]: { ok: false, text: String(e) } }));
@@ -39,11 +41,11 @@ export default function AiPane({ settings, update, env }: PaneProps) {
   };
 
   const test = async (id: ProviderId) => {
-    setMsg((m) => ({ ...m, [id]: { ok: true, text: "Łączenie…" } }));
+    setMsg((m) => ({ ...m, [id]: { ok: true, text: t("ai.connecting") } }));
     try {
       const list = await aiApi.test(id);
       setModels((x) => ({ ...x, [id]: list }));
-      setMsg((m) => ({ ...m, [id]: { ok: true, text: `Połączono — ${list.length} modeli` } }));
+      setMsg((m) => ({ ...m, [id]: { ok: true, text: tn("ai.connected", list.length) } }));
     } catch (e) {
       setMsg((m) => ({ ...m, [id]: { ok: false, text: String(e) } }));
     }
@@ -51,26 +53,23 @@ export default function AiPane({ settings, update, env }: PaneProps) {
 
   return (
     <section>
-      <h1>AI — podsumowania spotkań</h1>
-      <p className="hint">
-        Podsumowanie wysyła transkrypt (sam tekst, nie nagranie) do wybranego dostawcy. Klucze są przechowywane w systemowym magazynie haseł
-        (pęk kluczy macOS, Menedżer poświadczeń Windows, Secret Service w Linuksie) i nigdy nie trafiają do plików ustawień.
-      </p>
+      <h1>{t("ai.title")}</h1>
+      <p className="hint">{t("ai.intro")}</p>
       {env.os === "macos" && providers.some((p) => !p.has_key) && (
         <div className="row">
           <button onClick={importLegacy}>
-            <KeyRound size={14} /> Importuj klucze z Dyktando dla macOS
+            <KeyRound size={14} /> {t("ai.import")}
           </button>
-          <p className="hint">{importMsg ?? "Jednorazowo skopiuje klucze zapisane w poprzedniej aplikacji. macOS zapyta o zgodę na dostęp do pęku kluczy."}</p>
+          <p className="hint">{importMsg ?? t("ai.import_hint")}</p>
         </div>
       )}
       <div className="row">
-        <label>Domyślny dostawca</label>
+        <label>{t("ai.default_provider")}</label>
         <select value={settings.ai_provider} onChange={(e) => update({ ai_provider: e.target.value as ProviderId })}>
           {providers.map((p) => (
             <option key={p.id} value={p.id}>
               {p.name}
-              {p.has_key ? "" : " (brak klucza)"}
+              {p.has_key ? "" : ` ${t("ai.no_key_suffix")}`}
             </option>
           ))}
         </select>
@@ -81,31 +80,31 @@ export default function AiPane({ settings, update, env }: PaneProps) {
             <strong>{p.name}</strong>
             {p.has_key ? (
               <span className="ok">
-                <Check size={14} /> klucz zapisany
+                <Check size={14} /> {t("ai.key_saved")}
               </span>
             ) : (
-              <span className="hint">brak klucza</span>
+              <span className="hint">{t("ai.no_key")}</span>
             )}
           </div>
           <div className="grid">
-            <label>Klucz API</label>
+            <label>{t("ai.api_key")}</label>
             <span className="inline">
               <input
                 type="password"
                 autoComplete="off"
-                placeholder={p.has_key ? "•••••••• (wpisz nowy, aby zmienić; pusty + Zapisz usuwa)" : "wklej klucz"}
+                placeholder={p.has_key ? t("ai.key_placeholder_set") : t("ai.key_placeholder")}
                 value={keys[p.id] ?? ""}
                 onChange={(e) => setKeys((k) => ({ ...k, [p.id]: e.target.value }))}
               />
               <button onClick={() => saveKey(p.id)}>
-                <KeyRound size={14} /> Zapisz
+                <KeyRound size={14} /> {t("common.save")}
               </button>
             </span>
-            <label>Model</label>
+            <label>{t("common.model")}</label>
             <span className="inline">
               {models[p.id]?.length ? (
                 <select value={cfg(p.id).model || p.default_model} onChange={(e) => setCfg(p.id, { model: e.target.value })}>
-                  {!(cfg(p.id).model || p.default_model) && <option value="">— wybierz —</option>}
+                  {!(cfg(p.id).model || p.default_model) && <option value="">{t("ai.choose")}</option>}
                   {[...new Set([cfg(p.id).model || p.default_model, ...models[p.id]].filter(Boolean))].map((m) => (
                     <option key={m} value={m}>
                       {m}
@@ -116,23 +115,23 @@ export default function AiPane({ settings, update, env }: PaneProps) {
                 <input value={cfg(p.id).model} placeholder={p.model_placeholder} onChange={(e) => setCfg(p.id, { model: e.target.value })} />
               )}
               <button disabled={!p.has_key} onClick={() => test(p.id)}>
-                <Plug size={14} /> Testuj połączenie
+                <Plug size={14} /> {t("ai.test")}
               </button>
             </span>
-            <label>Adres API</label>
+            <label>{t("ai.base_url")}</label>
             <input value={cfg(p.id).base_url} placeholder={p.default_base_url} onChange={(e) => setCfg(p.id, { base_url: e.target.value })} />
           </div>
           {msg[p.id] && <div className={msg[p.id].ok ? "hint" : "error"}>{msg[p.id].text}</div>}
         </div>
       ))}
-      <h2>Prompt podsumowania</h2>
+      <h2>{t("ai.prompt")}</h2>
       <textarea
         rows={10}
         value={settings.ai_prompt || defaultPrompt}
         onChange={(e) => update({ ai_prompt: e.target.value === defaultPrompt ? "" : e.target.value })}
       />
       <button className="link" disabled={!settings.ai_prompt} onClick={() => update({ ai_prompt: "" })}>
-        Przywróć domyślny
+        {t("ai.restore_default")}
       </button>
     </section>
   );

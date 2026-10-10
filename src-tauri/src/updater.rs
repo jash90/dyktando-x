@@ -73,10 +73,10 @@ pub fn known_update(updates: tauri::State<Updates>) -> Option<UpdateInfo> {
 fn busy(app: &AppHandle) -> Result<(), String> {
     let state = app.state::<AppState>();
     if state.recorder.status().recording {
-        return Err("Trwa nagrywanie spotkania — zatrzymaj je przed aktualizacją.".into());
+        return Err(crate::i18n::t("update.busy_recording"));
     }
     if state.jobs.current().is_some() {
-        return Err("Trwa przetwarzanie spotkania — poczekaj na koniec albo je przerwij.".into());
+        return Err(crate::i18n::t("update.busy_processing"));
     }
     Ok(())
 }
@@ -86,12 +86,12 @@ pub async fn install_update(app: AppHandle) -> Result<(), String> {
     busy(&app)?;
     let updates = app.state::<Updates>();
     let Some(update) = updates.available.lock().unwrap().clone() else {
-        return Err("Brak aktualizacji do zainstalowania — sprawdź ponownie.".into());
+        return Err(crate::i18n::t("update.none"));
     };
     if updates.installing.swap(true, Ordering::SeqCst) {
         return Ok(());
     }
-    log::info!("Aktualizacja {} → {}", update.current_version, update.version);
+    log::info!("Update {} → {}", update.current_version, update.version);
     let mut done = 0u64;
     let mut last_emit = std::time::Instant::now();
     let downloaded = update
@@ -116,7 +116,7 @@ pub async fn install_update(app: AppHandle) -> Result<(), String> {
     let error = result.err();
     let _ = app.emit("update-progress", UpdateProgress { done, total: done, finished: true, error: error.clone() });
     if let Some(e) = error {
-        log::error!("Aktualizacja nieudana: {e}");
+        log::error!("Update failed: {e}");
         return Err(e);
     }
     // Windows: the NSIS installer closes the app itself; on macOS and Linux we start the new version.
@@ -129,9 +129,9 @@ pub fn check_on_startup(app: &AppHandle) {
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_secs(15)).await;
         match check(&app).await {
-            Ok(Some(u)) => log::info!("Dostępna aktualizacja {}", u.version),
+            Ok(Some(u)) => log::info!("Update available: {}", u.version),
             Ok(None) => {}
-            Err(e) => log::info!("Sprawdzanie aktualizacji: {e}"),
+            Err(e) => log::info!("Update check: {e}"),
         }
     });
 }
@@ -143,7 +143,7 @@ pub fn open_from_tray(app: &AppHandle) {
         let app = app.clone();
         tauri::async_runtime::spawn(async move {
             if let Err(e) = check(&app).await {
-                log::info!("Sprawdzanie aktualizacji: {e}");
+                log::info!("Update check: {e}");
                 // System panel already open — it shows the error instead of staying silent.
                 let _ = app.emit("update-check-failed", e);
             }

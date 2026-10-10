@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::io::AsyncWriteExt;
 
+use crate::i18n::{t, t_with};
 use crate::paths;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -45,8 +46,11 @@ pub struct RemoteFile {
 pub struct Asset {
     pub id: AssetId,
     pub dir: &'static str,
+    /// Proper name of the model (also stored with transcripts and dictations).
     pub title: &'static str,
-    pub description: &'static str,
+    /// Translation key prefix: `model.<key>.description` (and `model.<key>.title` where the title
+    /// isn't a proper name).
+    pub key: &'static str,
     pub files: &'static [RemoteFile],
 }
 
@@ -75,7 +79,7 @@ pub static ASSETS: &[Asset] = &[
         id: AssetId::Engine(EngineId::ParakeetV3),
         dir: "parakeet-tdt-0.6b-v3-int8",
         title: "Parakeet TDT 0.6B v3",
-        description: "NVIDIA, 25 języków, szybki i dokładny po polsku. Domyślny.",
+        key: "parakeet_v3",
         files: &[
             parakeet!("encoder-model.int8.onnx", 652_183_999),
             parakeet!("decoder_joint-model.int8.onnx", 18_202_004),
@@ -87,7 +91,7 @@ pub static ASSETS: &[Asset] = &[
         id: AssetId::Engine(EngineId::CanaryV2),
         dir: "canary-1b-v2-int8",
         title: "Canary 1B v2",
-        description: "NVIDIA, 25 języków, sam stawia interpunkcję i zapisuje liczby cyframi. Wolniejszy od Parakeeta.",
+        key: "canary_v2",
         files: &[
             canary!("encoder-model.int8.onnx", 859_078_138),
             canary!("decoder-model.int8.onnx", 170_040_374),
@@ -100,7 +104,7 @@ pub static ASSETS: &[Asset] = &[
         id: AssetId::Engine(EngineId::WhisperTurbo),
         dir: "whisper-large-v3-turbo",
         title: "Whisper large-v3-turbo",
-        description: "OpenAI, 99 języków, sam stawia interpunkcję. Wolniejszy od Parakeeta.",
+        key: "whisper_turbo",
         files: &[RemoteFile {
             url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin",
             name: "ggml-large-v3-turbo.bin",
@@ -111,7 +115,7 @@ pub static ASSETS: &[Asset] = &[
         id: AssetId::Engine(EngineId::WhisperLargeV3),
         dir: "whisper-large-v3",
         title: "Whisper large-v3",
-        description: "Najdokładniejszy Whisper (kwantyzacja q5_0), najwolniejszy.",
+        key: "whisper_large_v3",
         files: &[RemoteFile {
             url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-q5_0.bin",
             name: "ggml-large-v3-q5_0.bin",
@@ -122,7 +126,7 @@ pub static ASSETS: &[Asset] = &[
         id: AssetId::SileroVad,
         dir: "silero-vad",
         title: "Silero VAD",
-        description: "Wykrywanie mowy w nagraniach spotkań.",
+        key: "silero_vad",
         files: &[RemoteFile {
             url: "https://github.com/snakers4/silero-vad/raw/v4.0/files/silero_vad.onnx",
             name: "silero_vad.onnx",
@@ -132,8 +136,8 @@ pub static ASSETS: &[Asset] = &[
     Asset {
         id: AssetId::SpeakerModel,
         dir: "wespeaker-resnet34",
-        title: "Rozpoznawanie mówców",
-        description: "WeSpeaker ResNet34 — rozróżnia rozmówców w nagraniach spotkań.",
+        title: "Speaker recognition",
+        key: "speaker_model",
         files: &[RemoteFile {
             url: "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/wespeaker_en_voxceleb_resnet34_LM.onnx",
             name: "wespeaker_en_voxceleb_resnet34_LM.onnx",
@@ -143,10 +147,22 @@ pub static ASSETS: &[Asset] = &[
 ];
 
 pub fn asset(id: AssetId) -> &'static Asset {
-    ASSETS.iter().find(|a| a.id == id).expect("każdy AssetId ma wpis w ASSETS")
+    ASSETS.iter().find(|a| a.id == id).expect("every AssetId has an entry in ASSETS")
 }
 
 impl Asset {
+    /// Title for the UI in the current language.
+    pub fn label(&self) -> String {
+        let key = format!("model.{}.title", self.key);
+        let text = t(&key);
+        if text == key { self.title.to_string() } else { text }
+    }
+
+    /// Description for the UI in the current language.
+    pub fn description(&self) -> String {
+        t(&format!("model.{}.description", self.key))
+    }
+
     pub fn dir_path(&self) -> PathBuf {
         paths::models().join(self.dir)
     }
@@ -166,7 +182,7 @@ impl Asset {
     pub fn remove(&self) -> Result<()> {
         let dir = self.dir_path();
         if dir.exists() {
-            std::fs::remove_dir_all(&dir).with_context(|| format!("usuwanie {}", dir.display()))?;
+            std::fs::remove_dir_all(&dir).with_context(|| t_with("model.removing", &[("path", &dir.display())]))?;
         }
         Ok(())
     }
@@ -193,7 +209,7 @@ impl Asset {
                 .get(file.url)
                 .send()
                 .await
-                .with_context(|| format!("pobieranie {}", file.name))?;
+                .with_context(|| t_with("model.downloading", &[("file", &file.name)]))?;
             if !response.status().is_success() {
                 return Err(anyhow!("{}: HTTP {}", file.name, response.status()));
             }
@@ -204,9 +220,9 @@ impl Asset {
                 if cancel.load(Ordering::Relaxed) {
                     drop(out);
                     let _ = tokio::fs::remove_file(&part).await;
-                    return Err(anyhow!("Pobieranie przerwane"));
+                    return Err(anyhow!(t("model.download_cancelled")));
                 }
-                let chunk = chunk.with_context(|| format!("pobieranie {}", file.name))?;
+                let chunk = chunk.with_context(|| t_with("model.downloading", &[("file", &file.name)]))?;
                 out.write_all(&chunk).await?;
                 written += chunk.len() as u64;
                 progress(done + written, total);
@@ -215,7 +231,7 @@ impl Asset {
             drop(out);
             if written != file.size {
                 let _ = tokio::fs::remove_file(&part).await;
-                return Err(anyhow!("{}: pobrano {} z {} bajtów", file.name, written, file.size));
+                return Err(anyhow!(t_with("model.download_incomplete", &[("file", &file.name), ("done", &written), ("total", &file.size)])));
             }
             tokio::fs::rename(&part, &target).await?;
             done += file.size;
@@ -234,6 +250,10 @@ mod tests {
             assert!(!e.asset().files.is_empty());
         }
         assert_eq!(asset(AssetId::SileroVad).files.len(), 1);
+        for a in ASSETS {
+            let key = format!("model.{}.description", a.key);
+            assert_ne!(t(&key), key, "missing translation {key}");
+        }
     }
 
     #[test]

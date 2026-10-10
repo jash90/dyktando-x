@@ -124,7 +124,7 @@ pub struct Embedder {
 
 impl Embedder {
     pub fn load(model: &Path) -> Result<Self> {
-        let err = |e: &dyn std::fmt::Display| anyhow!("Model mówców: {e}");
+        let err = |e: &dyn std::fmt::Display| anyhow!(crate::i18n::t_with("model.speaker_error", &[("error", e)]));
         let session = Session::builder()
             .map_err(|e| err(&e))?
             .with_optimization_level(GraphOptimizationLevel::Level3)
@@ -149,10 +149,10 @@ impl Embedder {
             }
         }
         let input = TensorRef::from_array_view(arr.view().into_dyn()).map_err(|e| anyhow!("{e}"))?;
-        let outputs = self.session.run(inputs!["feats" => input]).map_err(|e| anyhow!("Model mówców: {e}"))?;
+        let outputs = self.session.run(inputs!["feats" => input]).map_err(|e| anyhow!(crate::i18n::t_with("model.speaker_error", &[("error", &e)])))?;
         let emb = outputs
             .get("embs")
-            .ok_or_else(|| anyhow!("Model mówców: brak wyjścia embs"))?
+            .ok_or_else(|| anyhow!(crate::i18n::t("model.speaker_no_output")))?
             .try_extract_array::<f32>()
             .map_err(|e| anyhow!("{e}"))?;
         let v: Vec<f32> = emb.iter().copied().collect();
@@ -181,7 +181,7 @@ pub fn cluster(items: &[(f64, Option<Vec<f32>>)], threshold: f32) -> Vec<Option<
         .map(|(i, _)| i)
         .collect();
     let mut groups: Vec<Vec<usize>> = long.iter().map(|&i| vec![i]).collect();
-    let emb = |i: usize| items[i].1.as_ref().expect("wektor");
+    let emb = |i: usize| items[i].1.as_ref().expect("embedding");
     // Similarities computed once (with a few hundred utterances the loop below goes over pairs
     // of clusters a few hundred times).
     let pos: std::collections::HashMap<usize, usize> = long.iter().enumerate().map(|(p, &i)| (i, p)).collect();

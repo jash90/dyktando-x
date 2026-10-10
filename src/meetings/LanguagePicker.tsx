@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, Languages } from "lucide-react";
 import type { EngineId, LanguageInfo } from "../api";
+import { t, useT } from "../i18n";
 
-/** Short summary of the selection on the button: „auto”, „polski”, „polski + angielski”, „polski + 2”. */
+/** Short summary of the selection on the button: "Language: auto", "Polish", "Polish + English", "Polish + 2". */
 export function languagesLabel(codes: string[], all: LanguageInfo[]): string {
   const name = (c: string) => all.find((l) => l.code === c)?.name ?? c;
-  if (codes.length === 0) return "Język: auto";
+  if (codes.length === 0) return t("lang_picker.auto_label");
   if (codes.length <= 2) return codes.map(name).join(" + ");
   return `${name(codes[0])} + ${codes.length - 1}`;
 }
@@ -17,22 +18,22 @@ export function languagesLabel(codes: string[], all: LanguageInfo[]): string {
  */
 export function languageCheck(engine: EngineId | null, codes: string[], all: LanguageInfo[]): { error?: string; warning?: string; hint?: string } {
   if (!engine || engine.startsWith("whisper")) {
-    return codes.length > 1 ? { hint: "Każda wypowiedź zostanie przepisana w tym z wybranych języków, w którym jest." } : {};
+    return codes.length > 1 ? { hint: t("lang_check.whisper_multi") } : {};
   }
   const model = engine === "canary_v2" ? "Canary" : "Parakeet";
   if (engine === "canary_v2" && codes.length > 1) {
-    return { error: "Canary nie rozpoznaje języka sam — wybierz jeden język albo Whispera." };
+    return { error: t("lang_check.canary_multi") };
   }
   if (engine === "canary_v2" && !codes.length) {
-    return { warning: "Canary nie rozpoznaje języka sam — bez wyboru przepisze jak po polsku. Wybierz język albo Whispera." };
+    return { warning: t("lang_check.canary_none") };
   }
   const unknown = codes.filter((c) => !all.find((l) => l.code === c)?.european);
   if (unknown.length) {
     const names = unknown.map((c) => all.find((l) => l.code === c)?.name ?? c).join(", ");
-    return { error: `${model} nie zna: ${names} — wybierz Whispera.` };
+    return { error: t("lang_check.unsupported", { model, names }) };
   }
   if (engine === "parakeet_v3" && codes.length) {
-    return { hint: "Parakeet sam rozpoznaje język — wybór języka działa z Whisperem i Canary." };
+    return { hint: t("lang_check.parakeet") };
   }
   return {};
 }
@@ -49,6 +50,7 @@ export default function LanguagePicker({
   disabled?: boolean;
   onChange: (codes: string[]) => void;
 }) {
+  const { t } = useT();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const root = useRef<HTMLDivElement>(null);
@@ -80,7 +82,7 @@ export default function LanguagePicker({
         disabled={disabled}
         aria-haspopup="listbox"
         aria-expanded={open}
-        title={`Języki rozmowy: ${languagesLabel(value, languages)} — przy słabej transkrypcji wskaż je i przepisz ponownie`}
+        title={t("lang_picker.title", { languages: languagesLabel(value, languages) })}
         onClick={() => {
           setQuery("");
           setOpen((o) => !o);
@@ -90,11 +92,11 @@ export default function LanguagePicker({
       </button>
       {open && (
         <div className="lang-pop">
-          <input autoFocus placeholder="Szukaj języka…" value={query} onChange={(e) => setQuery(e.target.value)} />
+          <input autoFocus placeholder={t("lang_picker.search")} value={query} onChange={(e) => setQuery(e.target.value)} />
           <div className="lang-list" role="listbox" aria-multiselectable="true">
             {!query && (
               <button role="option" aria-selected={value.length === 0} className={value.length === 0 ? "on" : ""} onClick={() => onChange([])}>
-                <span className="tick">{value.length === 0 && <Check size={13} />}</span> Automatycznie (model rozpozna sam)
+                <span className="tick">{value.length === 0 && <Check size={13} />}</span> {t("lang_picker.auto")}
               </button>
             )}
             {shown.map((l) => {
@@ -102,13 +104,13 @@ export default function LanguagePicker({
               return (
                 <button key={l.code} role="option" aria-selected={on} className={on ? "on" : ""} onClick={() => toggle(l.code)}>
                   <span className="tick">{on && <Check size={13} />}</span> {l.name}
-                  {!l.european && <span className="lang-note">tylko Whisper</span>}
+                  {!l.european && <span className="lang-note">{t("lang_picker.whisper_only")}</span>}
                 </button>
               );
             })}
-            {shown.length === 0 && <div className="lang-empty">Brak takiego języka</div>}
+            {shown.length === 0 && <div className="lang-empty">{t("lang_picker.empty")}</div>}
           </div>
-          <div className="lang-foot">Zaznacz kilka, jeśli rozmowa była w kilku językach.</div>
+          <div className="lang-foot">{t("lang_picker.foot")}</div>
         </div>
       )}
     </div>

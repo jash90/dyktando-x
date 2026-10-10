@@ -118,7 +118,7 @@ impl Store {
             id = format!("{base}-{n}");
             n += 1;
         }
-        std::fs::create_dir_all(self.audio_folder(&id)).context("tworzenie folderu spotkania")?;
+        std::fs::create_dir_all(self.audio_folder(&id)).with_context(|| crate::i18n::t("meeting.creating_folder"))?;
         let m = Meeting {
             id,
             started_at,
@@ -150,7 +150,7 @@ impl Store {
     }
 
     pub fn update(&self, id: &str, f: impl FnOnce(&mut Meeting)) -> Result<Meeting> {
-        let mut m = self.load(id).with_context(|| format!("brak spotkania {id}"))?;
+        let mut m = self.load(id).with_context(|| crate::i18n::t_with("meeting.not_found_id", &[("id", &id)]))?;
         f(&mut m);
         self.save(&m)?;
         Ok(m)
@@ -189,7 +189,7 @@ impl Store {
                 for prefix in [MIC, SYSTEM] {
                     for p in super::writer::segments(&self.audio_folder(&m.id), prefix) {
                         if let Err(e) = super::writer::repair(&p) {
-                            log::warn!("naprawa {}: {e}", p.display());
+                            log::warn!("repair {}: {e}", p.display());
                         }
                     }
                 }

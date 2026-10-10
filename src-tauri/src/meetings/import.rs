@@ -19,6 +19,7 @@ use symphonia::core::meta::MetadataOptions;
 use super::store::{Meeting, State, Store, SYSTEM};
 use super::writer::{SegmentedWriter, RATE};
 use crate::audio::resample::{downmix, StreamResampler};
+use crate::i18n;
 
 /// Extensions for the file picker filter.
 pub const EXTENSIONS: &[&str] = &["mp3", "m4a", "mp4", "aac", "wav", "flac", "ogg", "oga", "aif", "aiff", "caf", "mka", "webm", "opus"];
@@ -35,7 +36,7 @@ static CODECS: Lazy<CodecRegistry> = Lazy::new(|| {
 /// Decodes the file and yields successive mono chunks at the source rate: `(rate, samples,
 /// progress 0..=1 if the duration is known)`.
 pub fn decode(path: &Path, cancel: &AtomicBool, mut on_chunk: impl FnMut(u32, &[f32], Option<f32>) -> Result<()>) -> Result<()> {
-    let file = std::fs::File::open(path).with_context(|| format!("otwieranie {}", path.display()))?;
+    let file = std::fs::File::open(path).with_context(|| i18n::t_with("import.opening", &[("path", &path.display())]))?;
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
     let mut hint = Hint::new();
     if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
@@ -43,26 +44,26 @@ pub fn decode(path: &Path, cancel: &AtomicBool, mut on_chunk: impl FnMut(u32, &[
     }
     let mut format = symphonia::default::get_probe()
         .probe(&hint, mss, FormatOptions::default(), MetadataOptions::default())
-        .map_err(|e| anyhow!("Nieobsługiwany format pliku ({e})"))?;
-    let track = format.default_track(TrackType::Audio).ok_or_else(|| anyhow!("Plik nie zawiera ścieżki dźwiękowej"))?;
+        .map_err(|e| anyhow!(i18n::t_with("import.unsupported_format", &[("error", &e)])))?;
+    let track = format.default_track(TrackType::Audio).ok_or_else(|| anyhow!(i18n::t("import.no_audio_track")))?;
     let track_id = track.id;
     let total_frames = track.num_frames;
-    let params = track.codec_params.as_ref().and_then(|p| p.audio()).ok_or_else(|| anyhow!("Brak parametrów ścieżki dźwiękowej"))?;
+    let params = track.codec_params.as_ref().and_then(|p| p.audio()).ok_or_else(|| anyhow!(i18n::t("import.no_track_params")))?;
     let mut decoder = CODECS
         .make_audio_decoder(params, &AudioDecoderOptions::default())
-        .map_err(|e| anyhow!("Nieobsługiwany kodek ({e})"))?;
+        .map_err(|e| anyhow!(i18n::t_with("import.unsupported_codec", &[("error", &e)])))?;
 
     let mut interleaved: Vec<f32> = Vec::new();
     let mut frames_done: u64 = 0;
     loop {
         if cancel.load(Ordering::Relaxed) {
-            return Err(anyhow!("Przerwano"));
+            return Err(anyhow!(super::CANCELLED));
         }
         let packet = match format.next_packet() {
             Ok(Some(p)) => p,
             Ok(None) | Err(DecodeError::ResetRequired) => break,
             Err(DecodeError::IoError(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
-            Err(e) => return Err(anyhow!("Błąd odczytu pliku: {e}")),
+            Err(e) => return Err(anyhow!(i18n::t_with("import.read_error", &[("error", &e)]))),
         };
         if packet.track_id != track_id {
             continue;
@@ -71,11 +72,11 @@ pub fn decode(path: &Path, cancel: &AtomicBool, mut on_chunk: impl FnMut(u32, &[
             Ok(d) => d,
             // Corrupted packet — skip it, the rest of the recording is more valuable.
             Err(DecodeError::DecodeError(e)) => {
-                log::warn!("import: pominięty pakiet ({e})");
+                log::warn!("import: skipped packet ({e})");
                 continue;
             }
             Err(DecodeError::IoError(_)) => continue,
-            Err(e) => return Err(anyhow!("Błąd dekodowania: {e}")),
+            Err(e) => return Err(anyhow!(i18n::t_with("import.decode_error", &[("error", &e)]))),
         };
         let rate = decoded.spec().rate();
         let channels = decoded.spec().channels().count().max(1);
@@ -86,7 +87,7 @@ pub fn decode(path: &Path, cancel: &AtomicBool, mut on_chunk: impl FnMut(u32, &[
         on_chunk(rate, &mono, fraction)?;
     }
     if frames_done == 0 {
-        return Err(anyhow!("Plik nie zawiera dźwięku"));
+        return Err(anyhow!(i18n::t("import.no_audio")));
     }
     Ok(())
 }
@@ -95,7 +96,7 @@ pub fn decode(path: &Path, cancel: &AtomicBool, mut on_chunk: impl FnMut(u32, &[
 /// title = file name). The audio is appended by `fill`.
 pub fn create(store: &Store, path: &Path) -> Result<Meeting> {
     if !path.is_file() {
-        return Err(anyhow!("Nie ma takiego pliku: {}", path.display()));
+        return Err(anyhow!(i18n::t_with("import.no_such_file", &[("path", &path.display())])));
     }
     let started: DateTime<Local> = std::fs::metadata(path).and_then(|m| m.modified()).map(DateTime::from).unwrap_or_else(|_| Local::now());
     let meeting = store.create(started, true)?;
@@ -295,7 +296,7 @@ mod tests {
         let path = fixture("fleurs_kobieta.wav");
         let m = create(&s, &path).unwrap();
         let err = fill(&s, &m, &path, &AtomicBool::new(true), |_| {}).unwrap_err().to_string();
-        assert_eq!(err, "Przerwano");
+        assert_eq!(err, super::super::CANCELLED);
         assert!(s.load(&m.id).is_none());
         std::fs::remove_dir_all(&s.root).ok();
     }

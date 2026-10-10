@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { intlLocale, t, type PlainKey } from "./i18n";
 
 export type EngineId = "parakeet_v3" | "canary_v2" | "whisper_turbo" | "whisper_large_v3";
 export type Language = "pl" | "en" | "auto";
@@ -43,6 +44,8 @@ export interface Settings {
   ai_provider: ProviderId;
   ai_providers: Partial<Record<ProviderId, ProviderConfig>>;
   ai_prompt: string;
+  /** UI language: `system` follows the OS (Polish → pl, otherwise en). Independent of the dictation language. */
+  ui_language: "system" | "en" | "pl";
 }
 
 export type AssetId = { kind: "engine"; engine: EngineId } | { kind: "silero_vad" };
@@ -82,6 +85,8 @@ export type HudState =
 
 export const api = {
   getSettings: () => invoke<Settings>("get_settings"),
+  /** Resolved UI locale (backend is the source of truth for `ui_language: "system"`). */
+  uiLocale: () => invoke<"en" | "pl">("ui_locale"),
   languages: () => invoke<LanguageInfo[]>("list_languages"),
   /** Reveals the app log file in the file manager. */
   revealLogs: () => invoke<void>("reveal_logs"),
@@ -118,26 +123,19 @@ export interface UpdateProgress {
 }
 
 export function formatBytes(n: number): string {
-  if (n >= 1e9) return `${(n / 1e9).toFixed(1).replace(".", ",")} GB`;
-  if (n >= 1e6) return `${Math.round(n / 1e6)} MB`;
-  return `${Math.round(n / 1e3)} kB`;
+  const fmt = (v: number, digits: number) =>
+    new Intl.NumberFormat(intlLocale(), { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(v);
+  if (n >= 1e9) return `${fmt(n / 1e9, 1)} GB`;
+  if (n >= 1e6) return `${fmt(Math.round(n / 1e6), 0)} MB`;
+  return `${fmt(Math.round(n / 1e3), 0)} kB`;
 }
 
-/** Live translation languages (Canary 1B v2 translates between English and the others). */
-export const TRANSLATION_TARGETS: [string, string][] = [
-  ["", "nie tłumacz"],
-  ["en", "angielski"],
-  ["pl", "polski"],
-  ["de", "niemiecki"],
-  ["fr", "francuski"],
-  ["es", "hiszpański"],
-  ["it", "włoski"],
-  ["uk", "ukraiński"],
-  ["cs", "czeski"],
-  ["pt", "portugalski"],
-  ["nl", "niderlandzki"],
-  ["sv", "szwedzki"],
-];
+/** Live translation languages (Canary 1B v2 translates between English and the others). Labels: `translationTargetLabel`. */
+export const TRANSLATION_TARGETS: string[] = ["", "en", "pl", "de", "fr", "es", "it", "uk", "cs", "pt", "nl", "sv"];
+
+export function translationTargetLabel(code: string): string {
+  return t((code ? `lang.${code}` : "lang.none") as PlainKey);
+}
 
 export const ENGINE_LABELS: Record<EngineId, string> = {
   parakeet_v3: "Parakeet TDT 0.6B v3",
@@ -327,24 +325,23 @@ export const aiApi = {
   importLegacy: () => invoke<string[]>("import_legacy_keys"),
 };
 
-export const STATE_LABELS: Record<MeetingState, string> = {
-  recording: "nagrywane",
-  importing: "wczytywanie…",
-  interrupted: "przerwane",
-  recorded: "nagrane",
-  transcribing: "przepisywanie…",
-  transcribed: "przepisane",
-  summarizing: "podsumowywanie…",
-  summarized: "podsumowane",
-  failed: "błąd",
-};
-
-const MONTHS = ["sty", "lut", "mar", "kwi", "maj", "cze", "lip", "sie", "wrz", "paź", "lis", "gru"];
+export function stateLabel(state: MeetingState): string {
+  return t(`meeting.state.${state}`);
+}
 
 export function shortDate(iso: string): string {
-  const d = new Date(iso);
-  const hm = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-  return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}, ${hm}`;
+  return new Intl.DateTimeFormat(intlLocale(), {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(iso));
+}
+
+/** Backend cancellation sentinel (`"Przerwano"`; also accepts an English rendering). Not an error to show. */
+export function isCancelled(e: unknown): boolean {
+  return ["Przerwano", "Cancelled", "Canceled"].includes(String(e).trim());
 }
 
 export function clock(seconds: number): string {

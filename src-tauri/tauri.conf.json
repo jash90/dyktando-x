@@ -41,7 +41,11 @@
       "minimumSystemVersion": "13.0",
       "signingIdentity": "-",
       "entitlements": "./Entitlements.plist",
-      "hardenedRuntime": true
+      "hardenedRuntime": true,
+      "files": {
+        "Resources/en.lproj/InfoPlist.strings": "./infoplist/en.lproj/InfoPlist.strings",
+        "Resources/pl.lproj/InfoPlist.strings": "./infoplist/pl.lproj/InfoPlist.strings"
+      }
     },
     "linux": {
       "deb": {

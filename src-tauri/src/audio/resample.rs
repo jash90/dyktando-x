@@ -49,9 +49,9 @@ impl StreamResampler {
         while self.pending.len() >= r.input_frames_next() {
             let need = r.input_frames_next();
             let produced = {
-                let input = InterleavedSlice::new(&self.pending[..need], 1, need).expect("bufor wejścia");
+                let input = InterleavedSlice::new(&self.pending[..need], 1, need).expect("input buffer");
                 let cap = self.out_buf.len();
-                let mut output = InterleavedSlice::new_mut(&mut self.out_buf, 1, cap).expect("bufor wyjścia");
+                let mut output = InterleavedSlice::new_mut(&mut self.out_buf, 1, cap).expect("output buffer");
                 match r.process_into_buffer(&input, &mut output, None) {
                     Ok((_, produced)) => produced,
                     Err(e) => {

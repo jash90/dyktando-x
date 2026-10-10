@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { Download, Keyboard, Mic, ShieldCheck, Sparkles, Users, Volume2, type LucideIcon } from "lucide-react";
 import { api, type Environment, type Settings } from "../api";
+import { setLocale, useT, type PlainKey } from "../i18n";
 import DictationPane from "./DictationPane";
 import ModelsPane from "./ModelsPane";
 import AudioPane from "./AudioPane";
@@ -12,14 +13,14 @@ import AiPane from "./AiPane";
 
 type PaneId = "dictation" | "shortcuts" | "meetings" | "ai" | "models" | "audio" | "system";
 
-const PANES: { id: PaneId; title: string; icon: LucideIcon }[] = [
-  { id: "dictation", title: "Dyktowanie", icon: Mic },
-  { id: "shortcuts", title: "Skróty", icon: Keyboard },
-  { id: "meetings", title: "Spotkania", icon: Users },
-  { id: "ai", title: "AI", icon: Sparkles },
-  { id: "models", title: "Modele", icon: Download },
-  { id: "audio", title: "Audio", icon: Volume2 },
-  { id: "system", title: "System", icon: ShieldCheck },
+const PANES: { id: PaneId; title: PlainKey; icon: LucideIcon }[] = [
+  { id: "dictation", title: "settings.nav.dictation", icon: Mic },
+  { id: "shortcuts", title: "settings.nav.shortcuts", icon: Keyboard },
+  { id: "meetings", title: "settings.nav.meetings", icon: Users },
+  { id: "ai", title: "settings.nav.ai", icon: Sparkles },
+  { id: "models", title: "settings.nav.models", icon: Download },
+  { id: "audio", title: "settings.nav.audio", icon: Volume2 },
+  { id: "system", title: "settings.nav.system", icon: ShieldCheck },
 ];
 
 /** Pane from the URL (`index.html#system`) — this is how the tray opens a new window directly on a given pane. */
@@ -35,6 +36,7 @@ export interface PaneProps {
 }
 
 export default function SettingsApp() {
+  const { t } = useT();
   const [settings, setSettings] = useState<Settings | null>(null);
   const [env, setEnv] = useState<Environment | null>(null);
   const [pane, setPane] = useState<PaneId>(initialPane);
@@ -67,13 +69,17 @@ export default function SettingsApp() {
       const next = { ...prev, ...patch };
       api
         .saveSettings(next)
-        .then(setWarnings)
+        .then((w) => {
+          setWarnings(w);
+          // The backend also emits `ui-locale-changed`; ask directly too so this window switches right away.
+          if ("ui_language" in patch) api.uiLocale().then(setLocale).catch(() => {});
+        })
         .catch((e) => setWarnings([String(e)]));
       return next;
     });
   }, []);
 
-  if (!settings || !env) return <div className="loading">Wczytywanie…</div>;
+  if (!settings || !env) return <div className="loading">{t("common.loading")}</div>;
   const props: PaneProps = { settings, update, env };
 
   return (
@@ -85,7 +91,7 @@ export default function SettingsApp() {
         {PANES.map((p) => (
           <button key={p.id} className={`nav ${pane === p.id ? "active" : ""}`} onClick={() => setPane(p.id)}>
             <p.icon className="nav-icon" size={16} strokeWidth={2} aria-hidden />
-            {p.title}
+            {t(p.title)}
           </button>
         ))}
       </nav>

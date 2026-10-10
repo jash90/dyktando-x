@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { AlertTriangle, Check, Circle, LoaderCircle, type LucideIcon } from "lucide-react";
 import type { HudState } from "./api";
+import { useT } from "./i18n";
 
 function clock(seconds: number) {
   const s = Math.floor(seconds);
@@ -9,6 +10,7 @@ function clock(seconds: number) {
 }
 
 export default function Hud() {
+  const { t } = useT();
   const [state, setState] = useState<HudState>({ phase: "idle" });
 
   useEffect(() => {
@@ -24,16 +26,16 @@ export default function Hud() {
   switch (state.phase) {
     case "recording":
       Icon = Circle;
-      text = `Słucham… ${clock(state.seconds)}`;
+      text = t("hud.listening", { time: clock(state.seconds) });
       level = Math.min(1, state.level * 8);
       break;
     case "transcribing":
       Icon = LoaderCircle;
-      text = "Przepisuję";
+      text = t("hud.transcribing");
       break;
     case "done":
       Icon = Check;
-      text = state.pasted ? "Wklejono" : "Skopiowano do schowka";
+      text = state.pasted ? t("hud.pasted") : t("hud.copied");
       break;
     case "error":
       Icon = AlertTriangle;

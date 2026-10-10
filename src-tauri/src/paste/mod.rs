@@ -23,15 +23,15 @@ pub enum Outcome {
 static CLIPBOARD: Lazy<Mutex<Option<arboard::Clipboard>>> = Lazy::new(|| Mutex::new(arboard::Clipboard::new().ok()));
 
 fn with_clipboard<T>(f: impl FnOnce(&mut arboard::Clipboard) -> T) -> Result<T> {
-    let mut guard = CLIPBOARD.lock().map_err(|_| anyhow!("schowek zablokowany"))?;
+    let mut guard = CLIPBOARD.lock().map_err(|_| anyhow!(crate::i18n::t("paste.clipboard_locked")))?;
     if guard.is_none() {
-        *guard = Some(arboard::Clipboard::new().map_err(|e| anyhow!("schowek: {e}"))?);
+        *guard = Some(arboard::Clipboard::new().map_err(|e| anyhow!(crate::i18n::t_with("paste.clipboard_error", &[("error", &e)])))?);
     }
-    Ok(f(guard.as_mut().expect("schowek")))
+    Ok(f(guard.as_mut().expect("clipboard")))
 }
 
 pub fn set_clipboard(text: &str) -> Result<()> {
-    with_clipboard(|c| c.set_text(text.to_string()))?.map_err(|e| anyhow!("schowek: {e}"))
+    with_clipboard(|c| c.set_text(text.to_string()))?.map_err(|e| anyhow!(crate::i18n::t_with("paste.clipboard_error", &[("error", &e)])))
 }
 
 pub fn clipboard_text() -> Option<String> {
@@ -77,7 +77,7 @@ pub fn insert(text: &str, paste: bool) -> Result<Outcome> {
             Ok(Outcome::Pasted)
         }
         Err(e) => {
-            log::warn!("Wklejanie nie powiodło się, tekst został w schowku: {e}");
+            log::warn!("Pasting failed, the text stays in the clipboard: {e}");
             Ok(Outcome::Clipboard)
         }
     }
@@ -140,5 +140,5 @@ fn wayland_paste() -> Result<()> {
             Err(e) => errors.push(e.to_string()),
         }
     }
-    Err(anyhow!("Wayland: brak działającego narzędzia ({})", errors.join("; ")))
+    Err(anyhow!(crate::i18n::t_with("paste.wayland_no_tool", &[("errors", &errors.join("; "))])))
 }
