@@ -1,6 +1,6 @@
 import { Fragment, type ReactNode } from "react";
 
-/** Prosty, bezpieczny renderer Markdown (nagłówki, listy, pogrubienie, cytat) — bez innerHTML. */
+/** Simple, safe Markdown renderer (headings, lists, bold, blockquote) — no innerHTML. */
 function inline(text: string): ReactNode[] {
   const parts = text.split(/(\*\*[^*]+\*\*)/g);
   return parts.map((p, i) =>
@@ -22,7 +22,7 @@ export default function Markdown({ text }: { text: string }) {
     const line = raw.trimEnd();
     const bullet = line.match(/^\s*(?:[-*]|\d+\.)\s+(.*)$/);
     if (bullet) {
-      // Lista zadań z podsumowania: „- [ ] zrobić…” / „- [x] zrobione”.
+      // Task list from the summary: "- [ ] to do…" / "- [x] done".
       const task = bullet[1].match(/^\[( |x|X)\]\s+(.*)$/);
       list.push(
         task ? (

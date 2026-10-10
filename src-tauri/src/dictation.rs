@@ -1,5 +1,5 @@
-//! Przepływ dyktowania (odpowiednik AppDelegate ze Swifta):
-//! skrót → mikrofon → 16 kHz → silnik → postprocessing → wklejenie, ze stanem dla dymka (HUD).
+//! Dictation flow (the counterpart of AppDelegate in the Swift version):
+//! shortcut → microphone → 16 kHz → engine → postprocessing → paste, with state for the HUD bubble.
 use anyhow::{anyhow, Result};
 use serde::Serialize;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -15,7 +15,7 @@ use crate::paste;
 use crate::settings::{PasteMode, Settings};
 use crate::AppState;
 
-/// Krótsze nagranie to przypadkowe muśnięcie klawisza.
+/// A shorter recording is an accidental key brush.
 const MIN_SECONDS: f32 = 0.3;
 
 #[derive(Debug, Clone, Serialize)]
@@ -26,7 +26,7 @@ pub enum HudState {
     Transcribing,
     Done { text: String, pasted: bool },
     Error { message: String },
-    /// Krótka informacja (np. przypomnienie o zgodzie rozmówców przy nagrywaniu spotkania).
+    /// A short notice (e.g. a reminder about participants' consent when recording a meeting).
     Info { message: String },
 }
 
@@ -64,7 +64,7 @@ impl Dictation {
         self.recording.load(Ordering::Relaxed)
     }
 
-    /// Wczytuje silnik w tle, żeby pierwsze dyktowanie nie czekało kilku sekund.
+    /// Loads the engine in the background so the first dictation doesn't wait several seconds.
     pub fn preload(&self, id: EngineId) {
         if !id.asset().is_installed() {
             return;
@@ -75,7 +75,7 @@ impl Dictation {
             if guard.as_ref().map(|(i, _)| *i) == Some(id) {
                 return;
             }
-            *guard = None; // najpierw zwolnij stary model (pamięć)
+            *guard = None; // free the old model first (memory)
             match Engine::load(id) {
                 Ok(e) => *guard = Some((id, e)),
                 Err(e) => log::error!("preload {id:?}: {e}"),
@@ -138,7 +138,7 @@ impl Dictation {
         }
     }
 
-    /// Kończy nagranie; `cancel` odrzuca je bez transkrypcji.
+    /// Ends the recording; `cancel` discards it without transcription.
     pub fn stop(&self, app: &AppHandle, settings: Settings, cancel: bool) {
         let mut phase = self.phase.lock().unwrap();
         let Phase::Recording { capture, buffer, started } = std::mem::replace(&mut *phase, Phase::Idle) else {
@@ -168,7 +168,7 @@ impl Dictation {
                 Ok(Some(done)) => {
                     let pasted = done.outcome == paste::Outcome::Pasted;
                     emit(&app, HudState::Done { text: done.text.clone(), pasted });
-                    // Po wklejeniu — zapis w historii nie opóźnia wstawienia tekstu.
+                    // After pasting — saving to history doesn't delay inserting the text.
                     if settings.dictation_history {
                         let entry = dictations::Entry {
                             id: dictations::new_id(created_at),
@@ -191,7 +191,7 @@ impl Dictation {
     }
 }
 
-/// Przepisane i wstawione dyktowanie (z nagraniem 16 kHz — do historii).
+/// A transcribed and inserted dictation (with the 16 kHz recording — for history).
 struct Done {
     text: String,
     raw: String,

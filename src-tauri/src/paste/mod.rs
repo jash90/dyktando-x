@@ -1,9 +1,9 @@
-//! Wstawianie tekstu w aktywnym oknie: tekst do schowka → symulowane wklejenie →
-//! przywrócenie poprzedniej zawartości schowka (tylko tekstu — obrazków arboard nie odtworzy).
+//! Inserting text into the active window: text to the clipboard → simulated paste →
+//! restoring the previous clipboard contents (text only — arboard can't restore images).
 //!
-//! Wklejanie: macOS ⌘V (CGEvent przez enigo, wymaga Dostępności), Windows Ctrl+V (SendInput),
-//! Linux X11 Ctrl+V (XTest przez enigo), Linux Wayland: wtype → dotool → ydotool, a gdy
-//! żadne nie działa — tylko schowek.
+//! Pasting: macOS ⌘V (CGEvent via enigo, requires Accessibility), Windows Ctrl+V (SendInput),
+//! Linux X11 Ctrl+V (XTest via enigo), Linux Wayland: wtype → dotool → ydotool, and when
+//! none of them works — clipboard only.
 use anyhow::{anyhow, Result};
 use once_cell::sync::Lazy;
 use std::sync::Mutex;
@@ -12,14 +12,14 @@ use std::time::Duration;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Outcome {
-    /// Wklejone do aktywnego okna.
+    /// Pasted into the active window.
     Pasted,
-    /// Tylko w schowku (brak uprawnień, brak narzędzia, wybór użytkownika).
+    /// Clipboard only (no permissions, no tool, user's choice).
     Clipboard,
 }
 
-/// Schowek musi żyć przez cały czas działania aplikacji: na X11/Wayland to my „serwujemy”
-/// zawartość innym programom — po zniszczeniu obiektu wklejany tekst by znikał.
+/// The clipboard must live for the whole app lifetime: on X11/Wayland it's us who "serve"
+/// the contents to other programs — once the object is dropped, the pasted text would vanish.
 static CLIPBOARD: Lazy<Mutex<Option<arboard::Clipboard>>> = Lazy::new(|| Mutex::new(arboard::Clipboard::new().ok()));
 
 fn with_clipboard<T>(f: impl FnOnce(&mut arboard::Clipboard) -> T) -> Result<T> {
@@ -38,7 +38,7 @@ pub fn clipboard_text() -> Option<String> {
     with_clipboard(|c| c.get_text().ok()).ok().flatten()
 }
 
-/// Czy system pozwala nam symulować klawisze (macOS: Dostępność; gdzie indziej zawsze tak).
+/// Whether the system lets us simulate keys (macOS: Accessibility; elsewhere always yes).
 pub fn can_send_keys() -> bool {
     #[cfg(target_os = "macos")]
     {
@@ -56,7 +56,7 @@ pub fn is_wayland() -> bool {
             || std::env::var_os("WAYLAND_DISPLAY").is_some())
 }
 
-/// Wstawia tekst. `paste = false` → tylko schowek (bez przywracania — użytkownik wklei sam).
+/// Inserts text. `paste = false` → clipboard only (no restoring — the user pastes manually).
 pub fn insert(text: &str, paste: bool) -> Result<Outcome> {
     if !paste || !can_send_keys() {
         set_clipboard(text)?;
@@ -67,7 +67,7 @@ pub fn insert(text: &str, paste: bool) -> Result<Outcome> {
     std::thread::sleep(Duration::from_millis(40));
     match send_paste_keys() {
         Ok(()) => {
-            // Aplikacja czyta schowek dopiero po obsłużeniu skrótu — dajemy jej chwilę.
+            // The app reads the clipboard only after handling the shortcut — we give it a moment.
             std::thread::sleep(Duration::from_millis(250));
             if let Some(prev) = previous {
                 if clipboard_text().as_deref() == Some(text) {
@@ -94,7 +94,7 @@ fn enigo_paste() -> Result<()> {
     use enigo::{Direction, Enigo, Key, Keyboard, Settings};
     let mut enigo = Enigo::new(&Settings::default()).map_err(|e| anyhow!("enigo: {e}"))?;
     #[cfg(target_os = "macos")]
-    let (modifier, v) = (Key::Meta, Key::Other(9)); // kVK_ANSI_V — niezależnie od układu QWERTY/QWERTZ
+    let (modifier, v) = (Key::Meta, Key::Other(9)); // kVK_ANSI_V — regardless of QWERTY/QWERTZ layout
     #[cfg(not(target_os = "macos"))]
     let (modifier, v) = (Key::Control, Key::Unicode('v'));
     enigo.key(modifier, Direction::Press).map_err(|e| anyhow!("{e}"))?;
@@ -124,13 +124,13 @@ fn run(cmd: &str, args: &[&str], stdin: Option<&str>) -> Result<()> {
     }
 }
 
-/// wtype działa na wlroots (Sway, Hyprland…), nie na GNOME/KDE; dotool i ydotool wymagają
-/// dostępu do /dev/uinput. Każde po kolei, pierwsze udane wygrywa.
+/// wtype works on wlroots (Sway, Hyprland…), not on GNOME/KDE; dotool and ydotool require
+/// access to /dev/uinput. Each in turn; the first that succeeds wins.
 fn wayland_paste() -> Result<()> {
     let attempts: [(&str, &[&str], Option<&str>); 3] = [
         ("wtype", &["-M", "ctrl", "-k", "v", "-m", "ctrl"], None),
         ("dotool", &[], Some("key ctrl+v\n")),
-        // 29 = KEY_LEFTCTRL, 47 = KEY_V (kody evdev, niezależne od układu)
+        // 29 = KEY_LEFTCTRL, 47 = KEY_V (evdev codes, layout-independent)
         ("ydotool", &["key", "29:1", "47:1", "47:0", "29:0"], None),
     ];
     let mut errors = Vec::new();

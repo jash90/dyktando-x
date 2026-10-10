@@ -1,4 +1,4 @@
-//! Ikona w pasku menu / zasobniku: nagrywanie spotkania (z licznikiem), okna, wyjście.
+//! Menu bar / tray icon: meeting recording (with a timer), windows, quit.
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Manager, Wry};
@@ -23,7 +23,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<TrayItems> {
         app,
         &[&meeting, &status, &PredefinedMenuItem::separator(app)?, &meetings, &settings, &update, &PredefinedMenuItem::separator(app)?, &quit],
     )?;
-    // macOS: monochromatyczny szablon (system sam dobiera kolor do jasnego/ciemnego paska).
+    // macOS: monochrome template (the system picks the color for a light/dark menu bar itself).
     #[cfg(target_os = "macos")]
     let (icon, template) = (tauri::image::Image::from_bytes(include_bytes!("../icons/tray-template.png"))?, true);
     #[cfg(not(target_os = "macos"))]
@@ -45,7 +45,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<TrayItems> {
     Ok(TrayItems { meeting, status, update })
 }
 
-/// Odświeża napisy w menu i licznik przy ikonie (macOS: tytuł obok ikony).
+/// Refreshes the menu labels and the timer by the icon (macOS: title next to the icon).
 pub fn refresh(app: &AppHandle) {
     let Some(state) = app.try_state::<AppState>() else { return };
     let rec = state.recorder.status();

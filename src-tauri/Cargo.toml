@@ -23,7 +23,7 @@ tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 transcribe-rs = { version = "0.3.12", features = ["onnx", "vad-silero", "whisper-cpp"] }
-# Ta sama wersja co w transcribe-rs (GPU włącza jego feature) — bezpośrednio dla rozpoznania języka.
+# Same version as in transcribe-rs (its feature enables GPU) — used directly for language detection.
 whisper-rs = "0.16.0"
 cpal = "0.18.2"
 anyhow = "1.0.104"
@@ -82,7 +82,7 @@ uiautomation = "0.25.1"
 wasapi = "0.25.0"
 winreg = "0.56.0"
 
-# Zależności (ONNX, whisper.cpp, resampler) w trybie dev też optymalizowane — inaczej transkrypcja
-# w `tauri dev` i testach trwa wielokrotnie dłużej.
+# Dependencies (ONNX, whisper.cpp, resampler) are optimized in dev too — otherwise transcription
+# in `tauri dev` and tests takes many times longer.
 [profile.dev.package."*"]
 opt-level = 3

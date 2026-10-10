@@ -1,5 +1,5 @@
-//! Klient dostawców AI. OpenAI, OpenRouter i Z.AI mówią protokołem OpenAI Chat Completions;
-//! Anthropic ma własne Messages API. Budowa zapytań i parsowanie odpowiedzi są czyste (testy bez sieci).
+//! AI provider client. OpenAI, OpenRouter and Z.AI speak the OpenAI Chat Completions protocol;
+//! Anthropic has its own Messages API. Request building and response parsing are pure (no-network tests).
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::time::Duration;
@@ -8,13 +8,13 @@ use crate::settings::{ProviderId, Settings};
 
 pub const COMPLETION_TIMEOUT: Duration = Duration::from_secs(600);
 pub const MODELS_TIMEOUT: Duration = Duration::from_secs(30);
-/// Próby wysłania przy 429 / 5xx / 529 (przeciążenie) i błędach sieci.
+/// Send attempts on 429 / 5xx / 529 (overloaded) and network errors.
 pub const ATTEMPTS: u32 = 3;
 
 pub const ANTHROPIC_VERSION: &str = "2023-06-01";
-/// Odmowa klasyfikatora bezpieczeństwa → API samo powtarza zapytanie na zalecanym modelu zastępczym.
+/// Safety classifier refusal → the API itself retries the request on the recommended fallback model.
 pub const ANTHROPIC_FALLBACK_BETA: &str = "server-side-fallback-2026-07-01";
-/// Modele z serwerowym `fallbacks: "default"` (rodzina Opus 5 / Opus 5.5 / Sonnet 5.5 / Fable 5.1).
+/// Models with server-side `fallbacks: "default"` (Opus 5 / Opus 5.5 / Sonnet 5.5 / Fable 5.1).
 pub const ANTHROPIC_FALLBACK_MODELS: [&str; 4] =
     ["claude-opus-5", "claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-1"];
 const ANTHROPIC_HOST: &str = "api.anthropic.com";
@@ -24,7 +24,7 @@ pub type Headers = Vec<(String, String)>;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct LlmError {
     pub message: String,
-    /// Czy warto ponowić (429, 5xx, sieć).
+    /// Whether a retry is worthwhile (429, 5xx, network).
     pub retryable: bool,
 }
 
@@ -50,7 +50,7 @@ impl std::fmt::Display for LlmError {
 
 impl std::error::Error for LlmError {}
 
-/// `output_config.effort` — błąd 400 na Haiku 4.5, Sonnet 4.5 i starszych; obsługują go nowsze modele.
+/// `output_config.effort` — error 400 on Haiku 4.5, Sonnet 4.5 and older; newer models support it.
 pub fn anthropic_supports_effort(model: &str) -> bool {
     const SUPPORTED: [&str; 9] = [
         "claude-fable-", "claude-mythos-", "claude-opus-5", "claude-sonnet-5",
@@ -68,7 +68,7 @@ pub struct LlmConfig {
 }
 
 impl LlmConfig {
-    /// Pełna konfiguracja albo czytelny błąd, czego brakuje (`api_key` z `ai::keys::get`).
+    /// Full config or a readable error saying what's missing (`api_key` from `ai::keys::get`).
     pub fn from_settings(settings: &Settings, id: ProviderId, api_key: Option<String>) -> Result<Self, LlmError> {
         let Some(api_key) = api_key.filter(|k| !k.is_empty()) else {
             return Err(LlmError::new(format!(
@@ -83,12 +83,12 @@ impl LlmConfig {
         Ok(Self { provider: id, api_key, model, base_url })
     }
 
-    /// Jak `from_settings`, z kluczem z pęku kluczy.
+    /// Like `from_settings`, with the key from the keychain.
     pub fn load(settings: &Settings, id: ProviderId) -> Result<Self, LlmError> {
         Self::from_settings(settings, id, super::keys::get(id))
     }
 
-    /// Adres API bez białych znaków i ukośników na brzegach; niepoprawny → domyślny dostawcy.
+    /// API base URL without surrounding whitespace and slashes; invalid → the provider's default.
     pub fn base(&self) -> String {
         let trimmed = self.base_url.trim().trim_matches('/');
         match reqwest::Url::parse(trimmed) {
@@ -105,7 +105,7 @@ impl LlmConfig {
         self.provider == ProviderId::Anthropic
     }
 
-    /// Fallback tylko do oficjalnego API Anthropic (bramki/proxy pod innym adresem mogą go nie znać).
+    /// Fallback only for the official Anthropic API (gateways/proxies at other URLs may not know it).
     pub fn uses_fallbacks(&self) -> bool {
         self.is_anthropic()
             && ANTHROPIC_FALLBACK_MODELS.contains(&self.model.as_str())
@@ -120,14 +120,14 @@ impl LlmConfig {
         } else {
             h.push(("Authorization".into(), format!("Bearer {}", self.api_key)));
             if self.provider == ProviderId::Openrouter {
-                // Atrybucja w panelu OpenRouter (opcjonalna).
+                // Attribution in the OpenRouter dashboard (optional).
                 h.push(("X-Title".into(), "Dyktando X".into()));
             }
         }
         h
     }
 
-    /// Zapytanie o odpowiedź: (URL, nagłówki, ciało JSON).
+    /// Completion request: (URL, headers, JSON body).
     pub fn build_request(&self, system: &str, user: &str, max_tokens: u32) -> (String, Headers, Value) {
         let mut headers = vec![("Content-Type".to_string(), "application/json".to_string())];
         headers.extend(self.auth_headers());
@@ -138,7 +138,7 @@ impl LlmConfig {
                 "system": system,
                 "messages": [{"role": "user", "content": user}],
             });
-            // Claude Opus 5.5 ma domyślnie effort „medium” — ustawiamy jawnie tam, gdzie model to obsługuje.
+            // Claude Opus 5.5 defaults to effort "medium" — set it explicitly where the model supports it.
             if anthropic_supports_effort(&self.model) {
                 body["output_config"] = json!({"effort": "medium"});
             }
@@ -152,14 +152,14 @@ impl LlmConfig {
                 "model": self.model,
                 "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
             });
-            // Nowsze modele OpenAI przyjmują tylko max_completion_tokens; OpenRouter i Z.AI — max_tokens.
+            // Newer OpenAI models only accept max_completion_tokens; OpenRouter and Z.AI — max_tokens.
             let field = if self.provider == ProviderId::Openai { "max_completion_tokens" } else { "max_tokens" };
             body[field] = json!(max_tokens);
             (format!("{}/chat/completions", self.base()), headers, body)
         }
     }
 
-    /// Zapytanie o listę modeli: (URL, nagłówki). Anthropic bez nagłówka beta.
+    /// Model list request: (URL, headers). Anthropic without the beta header.
     pub fn build_models_request(&self) -> (String, Headers) {
         (format!("{}/models", self.base()), self.auth_headers())
     }
@@ -193,7 +193,7 @@ fn header_map(headers: &Headers) -> Result<reqwest::header::HeaderMap, LlmError>
     for (k, v) in headers {
         let name = reqwest::header::HeaderName::from_bytes(k.as_bytes())
             .map_err(|_| LlmError::new(format!("Niepoprawny nagłówek: {k}")))?;
-        // Bez wartości w komunikacie — to może być klucz API.
+        // No value in the message — it may be an API key.
         let value = reqwest::header::HeaderValue::from_str(v)
             .map_err(|_| LlmError::new(format!("Niepoprawna wartość nagłówka {k} — sprawdź klucz API")))?;
         map.insert(name, value);
@@ -201,18 +201,18 @@ fn header_map(headers: &Headers) -> Result<reqwest::header::HeaderMap, LlmError>
     Ok(map)
 }
 
-/// Ciało odpowiedzi jako obiekt JSON; cokolwiek innego → `{}`.
+/// Response body as a JSON object; anything else → `{}`.
 fn to_json(bytes: &[u8]) -> Value {
     serde_json::from_slice::<Value>(bytes).ok().filter(Value::is_object).unwrap_or_else(|| json!({}))
 }
 
-/// Odstęp przed kolejną próbą: `retry-after` z serwera, inaczej 2^(próba+1) s.
+/// Delay before the next attempt: `retry-after` from the server, otherwise 2^(attempt+1) s.
 fn retry_delay(attempt: u32, retry_after: Option<f64>) -> Duration {
     let secs = retry_after.unwrap_or_else(|| 2f64.powi(attempt as i32 + 1));
     Duration::from_secs_f64(if secs.is_finite() && secs > 0.0 { secs } else { 0.0 })
 }
 
-/// POST z ponawianiem dla błędów `retryable` i błędów sieci.
+/// POST with retries for `retryable` errors and network errors.
 async fn send(
     url: &str,
     headers: &Headers,
@@ -264,7 +264,7 @@ async fn send(
     Err(last)
 }
 
-/// Czytelny błąd HTTP z treścią komunikatu dostawcy.
+/// Readable HTTP error with the provider's message text.
 pub fn http_error(status: u16, json: &Value, body: &[u8]) -> LlmError {
     let detail = json["error"]["message"]
         .as_str()
@@ -284,7 +284,7 @@ pub fn http_error(status: u16, json: &Value, body: &[u8]) -> LlmError {
 
 const LENGTH_LIMIT: &str = "Model skończył się na limicie długości — brak treści";
 
-/// Odpowiedź Chat Completions (OpenAI / OpenRouter / Z.AI).
+/// Chat Completions response (OpenAI / OpenRouter / Z.AI).
 pub fn parse_openai(json: &Value) -> Result<String, LlmError> {
     let choice = &json["choices"][0];
     if !choice["message"].is_object() {
@@ -302,10 +302,10 @@ pub fn parse_openai(json: &Value) -> Result<String, LlmError> {
     Ok(text.to_string())
 }
 
-/// Odpowiedź Anthropic Messages API (bloki `text`; `thinking` i inne pomijane).
+/// Anthropic Messages API response (`text` blocks; `thinking` and others skipped).
 pub fn parse_anthropic(json: &Value) -> Result<String, LlmError> {
     let stop_reason = json["stop_reason"].as_str();
-    // Odmowa przychodzi jako HTTP 200 — sprawdzamy stop_reason, zanim przeczytamy treść.
+    // A refusal arrives as HTTP 200 — we check stop_reason before reading the content.
     if stop_reason == Some("refusal") {
         let category = json["stop_details"]["category"]
             .as_str()
@@ -334,7 +334,7 @@ pub fn parse_anthropic(json: &Value) -> Result<String, LlmError> {
     Ok(text.to_string())
 }
 
-/// Identyfikatory z `data[].id`; u dostawców zgodnych z OpenAI posortowane (Anthropic — kolejność API).
+/// IDs from `data[].id`; sorted for OpenAI-compatible providers (Anthropic — API order).
 pub fn parse_models(provider: ProviderId, json: &Value) -> Vec<String> {
     let mut ids: Vec<String> = json["data"]
         .as_array()
@@ -360,7 +360,7 @@ mod tests {
         h.iter().find(|(k, _)| k.eq_ignore_ascii_case(name)).map(|(_, v)| v.as_str())
     }
 
-    // Budowa zapytań
+    // Request building
 
     #[test]
     fn openai_request() {
@@ -462,7 +462,7 @@ mod tests {
         assert_eq!(e.message, "Wybierz model dla Z.AI (GLM) w Ustawieniach → AI.");
     }
 
-    // Odpowiedzi
+    // Responses
 
     #[test]
     fn parse_anthropic_joins_text_blocks_skips_thinking() {
@@ -507,7 +507,7 @@ mod tests {
         assert!(parse_models(ProviderId::Openai, &json!({})).is_empty());
     }
 
-    // Błędy HTTP
+    // HTTP errors
 
     #[test]
     fn http_error_mapping() {
@@ -538,7 +538,7 @@ mod tests {
         assert_eq!(retry_delay(0, Some(-3.0)), Duration::ZERO);
     }
 
-    // Lokalny serwer z podstawionymi odpowiedziami (127.0.0.1, żadnych prawdziwych dostawców).
+    // Local server with canned responses (127.0.0.1, no real providers).
 
     struct Stub {
         base: String,
@@ -555,7 +555,7 @@ mod tests {
                 let (mut sock, _) = listener.accept().await.unwrap();
                 let mut buf = Vec::new();
                 let mut chunk = [0u8; 4096];
-                // Nagłówki + ciało wg Content-Length.
+                // Headers + body per Content-Length.
                 loop {
                     let n = sock.read(&mut chunk).await.unwrap();
                     buf.extend_from_slice(&chunk[..n]);

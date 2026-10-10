@@ -1,14 +1,14 @@
-//! Ocena transkrypcji spotkań na własnych nagraniach (lokalnie, nagrań nie ma w repo).
-//! Robi to samo co aplikacja po imporcie pliku: dekodowanie → ścieżka „system” → `transcriber`.
+//! Evaluation of meeting transcription on your own recordings (locally, the recordings aren't in the repo).
+//! Does the same as the app after a file import: decoding → "system" track → `transcriber`.
 //!
 //! ```text
-//! DX_EVAL_FILE=~/Downloads/rozmowa.mp3      plik audio (wymagany)
-//! DX_EVAL_FROM=600 DX_EVAL_SECONDS=180      wycinek (s), domyślnie całość
-//! DX_EVAL_ENGINE=parakeet|canary|whisper_turbo|whisper_large   domyślnie parakeet
-//! DX_EVAL_LANG=auto|pl|pl,en                 domyślnie auto; kilka po przecinku = rozmowa mieszana
-//! DX_EVAL_VOCAB="NPaw, Tizen"              słownik nazw dla Whispera
-//! DX_EVAL_REF=wzorzec.txt                    tekst wzorcowy → WER
-//! DX_EVAL_OUT=katalog                        gdzie zapisać transkrypt (.md i .txt)
+//! DX_EVAL_FILE=~/Downloads/rozmowa.mp3      audio file (required)
+//! DX_EVAL_FROM=600 DX_EVAL_SECONDS=180      excerpt (s), whole file by default
+//! DX_EVAL_ENGINE=parakeet|canary|whisper_turbo|whisper_large   default parakeet
+//! DX_EVAL_LANG=auto|pl|pl,en                 default auto; several, comma-separated = mixed-language call
+//! DX_EVAL_VOCAB="NPaw, Tizen"              vocabulary of names for Whisper
+//! DX_EVAL_REF=wzorzec.txt                    reference text → WER
+//! DX_EVAL_OUT=katalog                        where to save the transcript (.md and .txt)
 //! cargo test --release --lib -- --ignored eval_meeting --nocapture
 //! ```
 use std::collections::BTreeMap;
@@ -22,7 +22,7 @@ use super::writer::{SegmentedWriter, RATE};
 use crate::audio::resample::StreamResampler;
 use crate::models::EngineId;
 
-/// Słowa do WER: małe litery, bez interpunkcji (cyfry i litery zostają).
+/// Words for WER: lowercase, no punctuation (digits and letters stay).
 pub fn words(text: &str) -> Vec<String> {
     text.to_lowercase()
         .split(|c: char| !c.is_alphanumeric())
@@ -31,7 +31,7 @@ pub fn words(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// Word error rate (podstawienia + usunięcia + wstawienia) / długość wzorca.
+/// Word error rate (substitutions + deletions + insertions) / reference length.
 pub fn wer(reference: &str, hypothesis: &str) -> f64 {
     let (r, h) = (words(reference), words(hypothesis));
     if r.is_empty() {
@@ -49,9 +49,9 @@ pub fn wer(reference: &str, hypothesis: &str) -> f64 {
     prev[h.len()] as f64 / r.len() as f64
 }
 
-/// Wypowiedź, która najpewniej wyszła w innym języku niż polski (Parakeet zgaduje język sam
-/// dla każdego fragmentu): co najmniej 4 słowa, żadnej polskiej litery i prawie żadnych
-/// polskich słów funkcyjnych.
+/// An utterance that most likely came out in a language other than Polish (Parakeet guesses the
+/// language on its own for each segment): at least 4 words, no Polish letters and almost no
+/// Polish function words.
 fn looks_foreign(text: &str) -> bool {
     const FUNCTION_WORDS: &[&str] = &[
         "i", "w", "z", "na", "nie", "to", "się", "że", "jest", "co", "jak", "ale", "do", "tak", "no", "ja", "ty", "on", "ona", "my",
@@ -103,7 +103,7 @@ fn eval_meeting() {
         _ => Vec::new(),
     };
 
-    // Wycinek pliku jako ścieżka „system” tymczasowego spotkania.
+    // Excerpt of the file as the "system" track of a temporary meeting.
     let root = std::env::temp_dir().join(format!("dx-eval-{}", std::process::id()));
     let store = Store { root: root.clone() };
     let meeting = import::create(&store, &file).unwrap();

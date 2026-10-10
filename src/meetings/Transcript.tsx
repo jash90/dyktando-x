@@ -1,12 +1,12 @@
 import { type CSSProperties } from "react";
 import Markdown from "../components/Markdown";
 
-/** Wypowiedź z `transcript.md`: „[00:01:30] **Rozmówca 1:** tekst”. */
+/** An utterance from `transcript.md`: „[00:01:30] **Rozmówca 1:** tekst” (speaker, text). */
 interface Line {
   time: string;
   speaker: string;
   text: string;
-  /** Tłumaczenie na żywo — linia „> …” zaraz pod wypowiedzią. */
+  /** Live translation — a "> …" line right below the utterance. */
   translation?: string;
 }
 
@@ -14,20 +14,20 @@ const LINE = /^\[(\d{2}:\d{2}:\d{2})\]\s+\*\*(.+?):\*\*\s*(.*)$/;
 const ME = "Ja";
 const PALETTE = 6;
 
-/** Ten sam mówca ma zawsze ten sam kolor (numer z nazwy, inaczej skrót z liter). */
+/** The same speaker always gets the same colour (number from the name, otherwise the sum of its character codes). */
 function speakerColor(name: string): CSSProperties {
   const n = name.match(/(\d+)$/);
   const index = n ? Number(n[1]) - 1 : [...name].reduce((a, c) => a + c.charCodeAt(0), 0);
   return { "--sp": `var(--sp-${((index % PALETTE) + PALETTE) % PALETTE})` } as CSSProperties;
 }
 
-/** „00:01:30” → „1:30”, „01:02:03” → „1:02:03”. */
+/** "00:01:30" → "1:30", "01:02:03" → "1:02:03". */
 function shortTime(t: string): string {
   const [h, m, s] = t.split(":").map(Number);
   return h ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}` : `${m}:${String(s).padStart(2, "0")}`;
 }
 
-/** Transkrypt jako lista wypowiedzi (czas, mówca, tekst); nietypowy plik — zwykły Markdown. */
+/** Transcript as a list of utterances (time, speaker, text); an unusual file falls back to plain Markdown. */
 export default function Transcript({ text }: { text: string }) {
   const rows = text.split("\n");
   const lines: Line[] = [];
@@ -42,7 +42,7 @@ export default function Transcript({ text }: { text: string }) {
     }
   }
   if (lines.length === 0) return <Markdown text={text} />;
-  // Linia „Długość: … · Model: … · Mówcy: …” pod tytułem — jako plakietki.
+  // The „Długość: … · Model: … · Mówcy: …” (duration, model, speakers) line under the title — rendered as badges.
   const meta = rows.find((r) => r.startsWith("Długość:"))?.split(" · ") ?? [];
   return (
     <div className="transcript">

@@ -1,7 +1,7 @@
-//! Rozpoznawanie mówców na ścieżce „system” bez sherpa-onnx: dla każdej wypowiedzi (fragmentu
-//! VAD) liczymy wektor głosu modelem WeSpeaker ResNet34 (ONNX, 256 wymiarów), a potem grupujemy
-//! wypowiedzi aglomeracyjnie po podobieństwie kosinusowym. Krótkie wypowiedzi (< 1 s) dają
-//! niepewne wektory — dopisujemy je do najbliższej grupy, nie tworzą własnych.
+//! Speaker recognition on the "system" track without sherpa-onnx: for each utterance (VAD
+//! segment) we compute a voice embedding with the WeSpeaker ResNet34 model (ONNX, 256 dims), then
+//! cluster utterances agglomeratively by cosine similarity. Short utterances (< 1 s) give
+//! unreliable embeddings — we attach them to the nearest cluster; they don't form their own.
 use anyhow::{anyhow, Result};
 use ndarray::Array3;
 use ort::inputs;
@@ -17,18 +17,18 @@ const FRAME: usize = 400; // 25 ms
 const SHIFT: usize = 160; // 10 ms
 const FFT: usize = 512;
 const MELS: usize = 80;
-/// Podobieństwo, powyżej którego dwie grupy to ten sam mówca (dobrane na nagraniach FLEURS).
+/// Similarity above which two clusters are the same speaker (tuned on FLEURS recordings).
 pub const SAME_SPEAKER: f32 = 0.45;
 const MIN_SECONDS_FOR_CLUSTER: f64 = 1.0;
-/// Grupa, w której łącznie mówi się krócej niż min(20 s, 15 % całej mowy), to nie osobny
-/// rozmówca, tylko niepewne wektory krótkich wtrąceń („mhm”, „okej”, kaszel) — na nagraniach
-/// rozmów takich „okruchów” było kilkadziesiąt (zob. `eval.rs`). Udział procentowy chroni
-/// krótkie nagrania, w których prawdziwy rozmówca mówi łącznie kilkanaście sekund.
+/// A cluster with less total speech than min(20 s, 15 % of all speech) is not a separate
+/// participant, just unreliable embeddings of short interjections ("mhm", "okej", a cough) — call
+/// recordings had dozens of such "crumbs" (see `eval.rs`). The percentage share protects short
+/// recordings in which a real participant speaks for only a dozen or so seconds in total.
 const MIN_GROUP_SECONDS: f64 = 20.0;
 const MIN_GROUP_SHARE: f64 = 0.15;
 
-/// Fbank w stylu Kaldi (jak w WeSpeaker): bez ditheru, usunięcie składowej stałej, preemfaza 0,97,
-/// okno Poveya, 80 pasm mel 20 Hz–8 kHz, log energii; na końcu odjęcie średniej (CMN).
+/// Kaldi-style fbank (as in WeSpeaker): no dither, DC offset removal, preemphasis 0.97,
+/// Povey window, 80 mel bands 20 Hz–8 kHz, log energy; finally mean subtraction (CMN).
 pub struct Fbank {
     window: Vec<f32>,
     mel: Vec<Vec<(usize, f32)>>,
@@ -70,7 +70,7 @@ impl Default for Fbank {
 }
 
 impl Fbank {
-    /// `samples` w zakresie [-1, 1]; model oczekuje skali int16 (normalize_samples = 0).
+    /// `samples` in the range [-1, 1]; the model expects int16 scale (normalize_samples = 0).
     pub fn compute(&self, samples: &[f32]) -> Vec<[f32; MELS]> {
         if samples.len() < FRAME {
             return Vec::new();
@@ -136,7 +136,7 @@ impl Embedder {
         Ok(Self { session, fbank: Fbank::default() })
     }
 
-    /// Znormalizowany wektor głosu (długość 1) albo `None` dla zbyt krótkiego fragmentu.
+    /// Normalised voice embedding (unit length), or `None` for a fragment that is too short.
     pub fn embed(&mut self, samples: &[f32]) -> Result<Option<Vec<f32>>> {
         let feats = self.fbank.compute(samples);
         if feats.len() < 20 {
@@ -170,10 +170,10 @@ pub fn cosine(a: &[f32], b: &[f32]) -> f32 {
     a.iter().zip(b).map(|(x, y)| x * y).sum()
 }
 
-/// Grupowanie: `items` = (czas trwania w s, wektor lub brak). Zwraca numer grupy dla każdej
-/// pozycji (`None`, gdy brak wektora i nie ma żadnej grupy). Numery w kolejności pojawienia się.
+/// Clustering: `items` = (duration in s, embedding or none). Returns a cluster number for each
+/// item (`None` when there's no embedding and no cluster at all). Numbers in order of appearance.
 pub fn cluster(items: &[(f64, Option<Vec<f32>>)], threshold: f32) -> Vec<Option<usize>> {
-    // 1) aglomeracja (średnie wiązanie) tylko dla wypowiedzi ≥ 1 s
+    // 1) agglomeration (average linkage) only for utterances ≥ 1 s
     let long: Vec<usize> = items
         .iter()
         .enumerate()
@@ -182,8 +182,8 @@ pub fn cluster(items: &[(f64, Option<Vec<f32>>)], threshold: f32) -> Vec<Option<
         .collect();
     let mut groups: Vec<Vec<usize>> = long.iter().map(|&i| vec![i]).collect();
     let emb = |i: usize| items[i].1.as_ref().expect("wektor");
-    // Podobieństwa liczone raz (przy kilkuset wypowiedziach pętla niżej przechodzi po parach
-    // grup kilkaset razy).
+    // Similarities computed once (with a few hundred utterances the loop below goes over pairs
+    // of clusters a few hundred times).
     let pos: std::collections::HashMap<usize, usize> = long.iter().enumerate().map(|(p, &i)| (i, p)).collect();
     let sim: Vec<Vec<f32>> = long.iter().map(|&i| long.iter().map(|&j| cosine(emb(i), emb(j))).collect()).collect();
     let avg_sim = |a: &Vec<usize>, b: &Vec<usize>| -> f32 {
@@ -219,7 +219,7 @@ pub fn cluster(items: &[(f64, Option<Vec<f32>>)], threshold: f32) -> Vec<Option<
         normalize(c)
     };
     let nearest = |e: &[f32], centroids: &[Vec<f32>]| centroids.iter().enumerate().map(|(g, c)| (g, cosine(e, c))).max_by(|a, b| a.1.total_cmp(&b.1)).map(|(g, _)| g);
-    // 1b) okruchy → do najbliższej ugruntowanej grupy (każda wypowiedź osobno)
+    // 1b) crumbs → into the nearest established cluster (each utterance separately)
     let seconds = |g: &[usize]| g.iter().map(|&i| items[i].0).sum::<f64>();
     let total: f64 = groups.iter().map(|g| seconds(g)).sum();
     let min_group = MIN_GROUP_SECONDS.min(MIN_GROUP_SHARE * total);
@@ -236,7 +236,7 @@ pub fn cluster(items: &[(f64, Option<Vec<f32>>)], threshold: f32) -> Vec<Option<
         }
         big
     };
-    // 2) centroidy i przypisanie pozostałych (krótkich) do najbliższej grupy
+    // 2) centroids and assignment of the remaining (short) ones to the nearest cluster
     let centroids: Vec<Vec<f32>> = groups.iter().map(|g| centroid(g)).collect();
     let mut raw: Vec<Option<usize>> = vec![None; items.len()];
     for (g, members) in groups.iter().enumerate() {
@@ -251,7 +251,7 @@ pub fn cluster(items: &[(f64, Option<Vec<f32>>)], threshold: f32) -> Vec<Option<
             }
         }
     }
-    // 3) numeracja w kolejności pojawienia się
+    // 3) numbering in order of appearance
     let mut order: Vec<usize> = Vec::new();
     raw.iter()
         .map(|g| {
@@ -280,14 +280,14 @@ mod tests {
             (3.0, v(&[0.0, 1.0, 0.1])),
             (2.0, v(&[1.0, 0.0, 0.0])),
             (4.0, v(&[0.05, 1.0, 0.0])),
-            (0.5, v(&[0.9, 0.1, 0.0])), // krótka → do najbliższej grupy
+            (0.5, v(&[0.9, 0.1, 0.0])), // short → to the nearest cluster
             (2.0, None),
         ];
         assert_eq!(cluster(&items, 0.5), vec![Some(0), Some(1), Some(0), Some(1), None]);
     }
 
-    /// Dwie osoby po 30 s plus pojedyncze krótkie wtrącenia z „rozmytym” wektorem (poniżej progu
-    /// podobieństwa do kogokolwiek) — nie mogą zostać osobnymi rozmówcami.
+    /// Two people at 30 s each plus single short interjections with a "blurry" embedding (below the
+    /// similarity threshold to anyone) — they must not become separate participants.
     #[test]
     fn small_groups_are_absorbed_into_nearest_speaker() {
         let mut items = Vec::new();
@@ -295,25 +295,25 @@ mod tests {
             items.push((3.0, v(&[1.0, 0.0, 0.0, 0.0])));
             items.push((3.0, v(&[0.0, 1.0, 0.0, 0.0])));
         }
-        items.push((1.5, v(&[0.6, 0.15, 0.78, 0.0]))); // bliżej A, ale poniżej progu
-        items.push((1.2, v(&[0.1, 0.5, 0.0, 0.86]))); // bliżej B
+        items.push((1.5, v(&[0.6, 0.15, 0.78, 0.0]))); // closer to A, but below the threshold
+        items.push((1.2, v(&[0.1, 0.5, 0.0, 0.86]))); // closer to B
         let got = cluster(&items, 0.45);
         assert_eq!(got.iter().flatten().max(), Some(&1), "dokładnie 2 rozmówców: {got:?}");
         assert_eq!(got[20], got[0]);
         assert_eq!(got[21], got[1]);
     }
 
-    /// Prawdziwy drugi głos, który mówi mało (jak pytanie z sali), zostaje osobnym rozmówcą.
+    /// A real second voice that speaks little (like a question from the audience) stays a separate participant.
     #[test]
     fn rare_but_distinct_speaker_is_kept() {
         let mut items: Vec<(f64, Option<Vec<f32>>)> = (0..40).map(|_| (5.0, v(&[1.0, 0.0, 0.0]))).collect();
-        items.extend((0..3).map(|_| (8.0, v(&[0.05, 1.0, 0.0])))); // 24 s z 224 s
+        items.extend((0..3).map(|_| (8.0, v(&[0.05, 1.0, 0.0])))); // 24 s out of 224 s
         let got = cluster(&items, 0.45);
         assert_eq!(got[40], Some(1), "{got:?}");
         assert_eq!(got.iter().flatten().max(), Some(&1));
     }
 
-    /// Krótkie nagranie (kilkanaście sekund na osobę) — udział procentowy chroni obu rozmówców.
+    /// Short recording (a dozen or so seconds per person) — the percentage share protects both participants.
     #[test]
     fn short_recording_keeps_both_speakers() {
         let items = vec![(9.0, v(&[1.0, 0.0])), (9.0, v(&[0.0, 1.0])), (9.0, v(&[1.0, 0.05])), (9.0, v(&[0.05, 1.0]))];
@@ -336,7 +336,7 @@ mod tests {
         r.samples::<i16>().map(|s| s.unwrap() as f32 / 32768.0).collect()
     }
 
-    /// Wymaga modelu (pobierany przez aplikację albo test `models`): `cargo test -- --ignored speakers`.
+    /// Requires the model (downloaded by the app or the `models` test): `cargo test -- --ignored speakers`.
     #[test]
     #[ignore]
     fn speakers_same_voice_closer_than_different() {

@@ -1,6 +1,6 @@
-//! Zapis ścieżki spotkania: 16 kHz mono, 16-bit WAV, nowy plik co 5 minut (`mic-001.wav`,
-//! `mic-002.wav`…). Nagłówek aktualizujemy co kilka sekund, a po awarii `repair` przelicza
-//! rozmiary z długości pliku — tracimy najwyżej ostatnie sekundy, nigdy całe nagranie.
+//! Writing a meeting track: 16 kHz mono, 16-bit WAV, a new file every 5 minutes (`mic-001.wav`,
+//! `mic-002.wav`…). The header is updated every few seconds, and after a crash `repair` recomputes
+//! the sizes from the file length — we lose at most the last few seconds, never the whole recording.
 use anyhow::{Context, Result};
 use std::fs::File;
 use std::io::{BufWriter, Read, Seek, SeekFrom, Write};
@@ -19,7 +19,7 @@ pub fn segment_path(dir: &Path, prefix: &str, index: usize) -> PathBuf {
     dir.join(format!("{prefix}-{index:03}.wav"))
 }
 
-/// Pliki danej ścieżki w kolejności.
+/// Files of a given track, in order.
 pub fn segments(dir: &Path, prefix: &str) -> Vec<PathBuf> {
     let mut v: Vec<PathBuf> = std::fs::read_dir(dir)
         .map(|it| {
@@ -119,7 +119,7 @@ impl SegmentedWriter {
     }
 }
 
-/// Naprawia nagłówek WAV po awarii (rozmiary RIFF i `data` liczone z długości pliku).
+/// Repairs the WAV header after a crash (RIFF and `data` sizes computed from the file length).
 pub fn repair(path: &Path) -> Result<bool> {
     let mut f = std::fs::OpenOptions::new().read(true).write(true).open(path)?;
     let len = f.metadata()?.len();
@@ -134,7 +134,7 @@ pub fn repair(path: &Path) -> Result<bool> {
         let size = u32::from_le_bytes(header[pos + 4..pos + 8].try_into().unwrap()) as usize;
         if id == b"data" {
             let data_start = pos as u64 + 8;
-            // Pełne próbki 16-bit.
+            // Whole 16-bit samples.
             let data_len = ((len - data_start) / 2 * 2) as u32;
             let riff_len = (data_start + data_len as u64 - 8) as u32;
             let current_data = size as u32;
@@ -153,8 +153,8 @@ pub fn repair(path: &Path) -> Result<bool> {
     Ok(false)
 }
 
-/// Odczyt całej ścieżki (wszystkich segmentów) jako 16 kHz f32 — porcjami przez `on_chunk`,
-/// żeby godzinne nagranie nie musiało leżeć w RAM.
+/// Reads the whole track (all segments) as 16 kHz f32 — in chunks via `on_chunk`, so that
+/// an hour-long recording doesn't have to sit in RAM.
 pub fn read_track(dir: &Path, prefix: &str, chunk_seconds: u32, mut on_chunk: impl FnMut(u64, &[f32]) -> Result<()>) -> Result<u64> {
     let chunk = (chunk_seconds * RATE) as usize;
     let mut buf: Vec<f32> = Vec::with_capacity(chunk);
@@ -191,10 +191,10 @@ pub fn track_duration_samples(dir: &Path, prefix: &str) -> u64 {
         .sum()
 }
 
-/// Kolejne próbki ścieżki (wszystkie segmenty po kolei) bez trzymania całości w RAM.
-/// Każdy segment poza ostatnim ma dokładnie `SEGMENT_SECONDS` — uszkodzony albo ucięty
-/// dopełniamy ciszą do tej długości, żeby dalsza część ścieżki nie przesunęła się w czasie
-/// (w miksie rozjechałyby się strony rozmowy).
+/// Successive samples of a track (all segments in order) without holding the whole thing in RAM.
+/// Every segment except the last is exactly `SEGMENT_SECONDS` — a corrupted or truncated one is
+/// padded with silence to that length so the rest of the track doesn't shift in time
+/// (in the mix the two sides of the conversation would drift apart).
 fn track_samples(dir: &Path, prefix: &str) -> impl Iterator<Item = i16> {
     let paths = segments(dir, prefix);
     let last = paths.len().saturating_sub(1);
@@ -215,11 +215,11 @@ fn track_samples(dir: &Path, prefix: &str) -> impl Iterator<Item = i16> {
     })
 }
 
-/// Ścieżki jako jeden plik WAV (eksport). Kilka ścieżek jest miksowanych próbka po próbce:
-/// zaczynają się w tej samej chwili (recorder dopełnia przerwy ciszą), krótszą kończy cisza.
-/// Sumę przycinamy do zakresu 16 bitów — mowa obu stron naraz zdarza się rzadko i krótko.
-/// Zapis idzie do pliku tymczasowego obok celu, więc przerwany eksport nie zostawia uciętego
-/// pliku ani nie psuje istniejącego.
+/// Tracks as a single WAV file (export). Multiple tracks are mixed sample by sample:
+/// they start at the same moment (the recorder pads gaps with silence), the shorter one ends in silence.
+/// The sum is clipped to the 16-bit range — both sides speaking at once is rare and brief.
+/// Writing goes to a temporary file next to the target, so an interrupted export leaves no truncated
+/// file and doesn't corrupt an existing one.
 pub fn export_wav(dir: &Path, prefixes: &[&str], target: &Path) -> Result<u64> {
     let mut part = target.as_os_str().to_owned();
     part.push(".part");
@@ -262,8 +262,8 @@ mod tests {
         std::fs::create_dir_all(&d).unwrap();
         d
     }
-    /// Testy biegną równolegle, a zegar macOS ma rozdzielczość mikrosekundy — sam czas potrafi
-    /// dać dwóm testom ten sam katalog, więc dokładamy licznik.
+    /// Tests run in parallel, and the macOS clock has microsecond resolution — time alone can
+    /// give two tests the same directory, so we add a counter.
     fn rand_suffix() -> String {
         static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
         let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -274,7 +274,7 @@ mod tests {
     fn rotates_segments_and_reads_back() {
         let dir = tmp();
         let mut w = SegmentedWriter::new(&dir, "mic").unwrap();
-        // 12,5 min w kawałkach po 0,1 s
+        // 12.5 min in 0.1 s pieces
         let block: Vec<f32> = (0..1600).map(|i| (i as f32 / 1600.0) - 0.5).collect();
         for _ in 0..(750 * 10) {
             w.append(&block).unwrap();
@@ -303,7 +303,7 @@ mod tests {
         let dir = tmp();
         let mut w = SegmentedWriter::new(&dir, "system").unwrap();
         w.append(&vec![0.25; 16_000]).unwrap();
-        // „Awaria”: nie wołamy finish, zrzucamy bufor i porzucamy obiekt bez finalize.
+        // "Crash": we don't call finish, we flush the buffer and abandon the object without finalize.
         if let Some(writer) = w.current.as_mut() {
             writer.flush().unwrap();
         }
@@ -311,10 +311,10 @@ mod tests {
         let path = segment_path(&dir, "system", 1);
         {
             let inner = w.current.take().unwrap();
-            // Dopisz dane bez aktualizacji nagłówka.
+            // Append data without updating the header.
             std::mem::forget(inner);
         }
-        // forget mógł nie zrzucić bufora — dopisz ręcznie 8000 próbek jak po awarii
+        // forget might not have flushed the buffer — append 8000 samples manually as after a crash
         let mut f = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
         let len_before = f.metadata().unwrap().len();
         if len_before < 44 + 48_000 {
@@ -336,7 +336,7 @@ mod tests {
         let mut w = SegmentedWriter::new(&dir, "mic").unwrap();
         w.append(&[0.1; 100]).unwrap();
         w.finish().unwrap();
-        // Cel zajęty przez katalog: zapis do `.part` się udaje, rename już nie.
+        // Target occupied by a directory: writing to `.part` succeeds, the rename doesn't.
         let out = dir.join("taken.wav");
         std::fs::create_dir_all(&out).unwrap();
         assert!(export_wav(&dir, &["mic"], &out).is_err());
@@ -356,7 +356,7 @@ mod tests {
         let out = dir.join("mix.wav");
         assert_eq!(export_wav(&dir, &["mic", "system"], &out).unwrap(), 5);
         let got: Vec<i16> = hound::WavReader::open(&out).unwrap().into_samples().map(|s| s.unwrap()).collect();
-        // 0.25+0.5, 0.25+1.0 (przycięte), 0.25-0.25, potem sam system.
+        // 0.25+0.5, 0.25+1.0 (clipped), 0.25-0.25, then system alone.
         assert_eq!(got, vec![24576, i16::MAX, 0, 16384, 16384]);
         std::fs::remove_dir_all(dir).ok();
     }
@@ -365,7 +365,7 @@ mod tests {
     fn broken_middle_segment_keeps_later_audio_in_place() {
         let dir = tmp();
         std::fs::create_dir_all(&dir).unwrap();
-        // Ucięty środkowy segment (10 próbek zamiast 5 minut), potem zdrowy ostatni.
+        // Truncated middle segment (10 samples instead of 5 minutes), then a healthy last one.
         let mut a = hound::WavWriter::create(segment_path(&dir, "mic", 1), spec()).unwrap();
         (0..10).for_each(|_| a.write_sample(100i16).unwrap());
         a.finalize().unwrap();

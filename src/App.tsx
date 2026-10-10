@@ -5,7 +5,7 @@ import LiveWindow from "./meetings/LiveWindow";
 import Prompt from "./Prompt";
 
 export default function App() {
-  // Jedno wejście dla wszystkich okien; dymek ładuje `index.html#hud`.
+  // One entry point for all windows; the bubble loads `index.html#hud`.
   if (window.location.hash === "#hud") {
     document.documentElement.classList.add("hud-root");
     return <Hud />;

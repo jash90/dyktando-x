@@ -1,6 +1,6 @@
-//! Aktualizacje z GitHub Releases (`latest.json` podpisany kluczem minisign, patrz `tauri.conf.json`).
-//! Sprawdzanie na żądanie (Ustawienia → System, menu traya) i jedno ciche przy starcie, które
-//! tylko zmienia pozycję w trayu — instalacja zawsze wymaga kliknięcia.
+//! Updates from GitHub Releases (`latest.json` signed with a minisign key, see `tauri.conf.json`).
+//! Checks on demand (Settings → System, tray menu) and one silent check at startup, which
+//! only changes the tray item — installing always requires a click.
 use serde::Serialize;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
@@ -16,7 +16,7 @@ pub struct Updates {
 }
 
 impl Updates {
-    /// Wersja znalezionej (jeszcze niezainstalowanej) aktualizacji.
+    /// Version of the found (not yet installed) update.
     pub fn available_version(&self) -> Option<String> {
         self.available.lock().unwrap().as_ref().map(|u| u.version.clone())
     }
@@ -47,8 +47,8 @@ fn info(u: &Update) -> UpdateInfo {
     }
 }
 
-/// Sprawdza serwer, zapamiętuje wynik i ogłasza go (`update-status`) — panel System słucha,
-/// więc widzi też wynik sprawdzenia uruchomionego z traya albo przy starcie.
+/// Checks the server, stores and broadcasts the result (`update-status`) — the System panel listens,
+/// so it also sees the result of a check started from the tray or at startup.
 async fn check(app: &AppHandle) -> Result<Option<UpdateInfo>, String> {
     let found = app.updater().map_err(|e| e.to_string())?.check().await.map_err(|e| e.to_string())?;
     let info = found.as_ref().map(info);
@@ -63,13 +63,13 @@ pub async fn check_update(app: AppHandle) -> Result<Option<UpdateInfo>, String> 
     check(&app).await
 }
 
-/// Ostatnio znaleziona aktualizacja, bez pytania serwera.
+/// The most recently found update, without asking the server.
 #[tauri::command]
 pub fn known_update(updates: tauri::State<Updates>) -> Option<UpdateInfo> {
     updates.available.lock().unwrap().as_ref().map(info)
 }
 
-/// Instalacja zamyka albo restartuje aplikację — nie wolno jej robić w trakcie spotkania.
+/// Installing closes or restarts the app — it must not be done during a meeting.
 fn busy(app: &AppHandle) -> Result<(), String> {
     let state = app.state::<AppState>();
     if state.recorder.status().recording {
@@ -107,7 +107,7 @@ pub async fn install_update(app: AppHandle) -> Result<(), String> {
         )
         .await
         .map_err(|e| e.to_string());
-    // Spotkanie mogło się zacząć w trakcie pobierania — sprawdzamy jeszcze raz tuż przed instalacją.
+    // A meeting may have started during the download — we check again right before installing.
     let result = downloaded.and_then(|bytes| {
         busy(&app)?;
         update.install(bytes).map_err(|e| e.to_string())
@@ -119,11 +119,11 @@ pub async fn install_update(app: AppHandle) -> Result<(), String> {
         log::error!("Aktualizacja nieudana: {e}");
         return Err(e);
     }
-    // Windows: instalator NSIS sam zamyka aplikację; na macOS i Linuksie uruchamiamy nową wersję.
+    // Windows: the NSIS installer closes the app itself; on macOS and Linux we start the new version.
     app.restart();
 }
 
-/// Ciche sprawdzenie chwilę po starcie (nie konkuruje z wczytywaniem modelu); błędy tylko do logu.
+/// Silent check shortly after startup (doesn't compete with model loading); errors only to the log.
 pub fn check_on_startup(app: &AppHandle) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
@@ -136,7 +136,7 @@ pub fn check_on_startup(app: &AppHandle) {
     });
 }
 
-/// Pozycja w trayu: pokazuje ustawienia na panelu System; bez znanej aktualizacji najpierw sprawdza.
+/// Tray item: shows settings on the System panel; without a known update it checks first.
 pub fn open_from_tray(app: &AppHandle) {
     crate::show_window(app, crate::Window::SettingsPane("system"));
     if app.state::<Updates>().available_version().is_none() {
@@ -144,7 +144,7 @@ pub fn open_from_tray(app: &AppHandle) {
         tauri::async_runtime::spawn(async move {
             if let Err(e) = check(&app).await {
                 log::info!("Sprawdzanie aktualizacji: {e}");
-                // Panel System jest już otwarty — pokaże błąd zamiast milczeć.
+                // System panel already open — it shows the error instead of staying silent.
                 let _ = app.emit("update-check-failed", e);
             }
         });

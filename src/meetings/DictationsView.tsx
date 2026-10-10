@@ -7,7 +7,7 @@ import LanguagePicker, { languageCheck } from "./LanguagePicker";
 const DAY = new Intl.DateTimeFormat("pl-PL", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
 const TIME = new Intl.DateTimeFormat("pl-PL", { hour: "2-digit", minute: "2-digit" });
 
-/** „1 dyktowanie”, „3 dyktowania”, „5 dyktowań”, „22 dyktowania”. */
+/** Polish plural forms: „1 dyktowanie”, „3 dyktowania”, „5 dyktowań”, „22 dyktowania”. */
 export function countLabel(n: number): string {
   const tens = n % 100;
   const ones = n % 10;
@@ -16,13 +16,13 @@ export function countLabel(n: number): string {
   return `${n} dyktowań`;
 }
 
-/** Historia dyktowania: wpisy od najnowszych, pogrupowane po dniach, z ponownym przepisaniem. */
+/** Dictation history: entries newest first, grouped by day, with re-transcription. */
 export default function DictationsView({ query, onError }: { query: string; onError: (e: string | null) => void }) {
   const [entries, setEntries] = useState<DictationEntry[]>([]);
   const [engine, setEngine] = useState<EngineId | null>(null);
   const [languages, setLanguages] = useState<string[]>([]);
   const [allLanguages, setAllLanguages] = useState<LanguageInfo[]>([]);
-  /** Wpis, który właśnie jest przepisywany od nowa. */
+  /** The entry currently being re-transcribed. */
   const [retranscribing, setRetranscribing] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
 

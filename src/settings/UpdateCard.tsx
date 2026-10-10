@@ -22,7 +22,7 @@ export default function UpdateCard() {
   useEffect(() => {
     getVersion().then(setVersion);
     api.knownUpdate().then((info) => info && setStatus({ kind: "available", info }));
-    // Wynik sprawdzenia przy starcie albo z traya.
+    // Result of the check at startup or from the tray.
     const unStatus = listen<UpdateInfo | null>("update-status", (e) => {
       setStatus((s) => (s.kind === "installing" ? s : e.payload ? { kind: "available", info: e.payload } : { kind: "latest" }));
     });
@@ -50,7 +50,7 @@ export default function UpdateCard() {
 
   const install = (info: UpdateInfo) => {
     setStatus({ kind: "installing", info, done: 0, total: 0 });
-    // Po sukcesie aplikacja uruchamia się ponownie — tu wracamy tylko przy błędzie.
+    // On success the app restarts — we only get back here on error.
     api.installUpdate().catch((e) => setStatus({ kind: "error", message: String(e), info }));
   };
 

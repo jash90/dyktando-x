@@ -1,6 +1,6 @@
-//! Linux: monitor domyślnego wyjścia przez `parec` (pulseaudio-utils; działa też z PipeWire
-//! przez pipewire-pulse). Nagrywa całe wyjście — także dźwięki samego Dyktando X, których
-//! aplikacja zresztą nie odtwarza.
+//! Linux: monitor of the default output via `parec` (pulseaudio-utils; also works with PipeWire
+//! via pipewire-pulse). Records the whole output — including sounds from Dyktando X itself,
+//! which the app doesn't play anyway.
 use anyhow::{anyhow, Context, Result};
 use std::io::Read;
 use std::process::{Child, Command, Stdio};
@@ -65,8 +65,8 @@ impl Capture {
         Ok((Self { child: Some(child), thread: Some(thread) }, RATE))
     }
 
-    /// `parec` zostaje przy monitorze wybranym na starcie; gdy się zamknie (urządzenie
-    /// zniknęło), dostawy ustają i nadzór nagrania tworzy przechwytywanie od nowa.
+    /// `parec` stays on the monitor chosen at startup; when it closes (the device disappeared),
+    /// deliveries stop and the recording supervisor recreates the capture.
     pub fn device_changed(&self) -> bool {
         false
     }

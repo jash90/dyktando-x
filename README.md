@@ -1,5 +1,7 @@
 # Dyktando X
 
+English | [Polski](README.pl.md)
+
 Polish dictation and meeting recording for **macOS, Windows and Linux**. Speech recognition runs
 locally and recordings never leave your computer. Only the transcript is sent to an AI provider,
 and only when you ask for a summary.

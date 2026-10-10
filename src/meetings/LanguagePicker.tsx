@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, Languages } from "lucide-react";
 import type { EngineId, LanguageInfo } from "../api";
 
-/** Krótki opis wyboru na przycisku: „auto”, „polski”, „polski + angielski”, „polski + 2”. */
+/** Short summary of the selection on the button: „auto”, „polski”, „polski + angielski”, „polski + 2”. */
 export function languagesLabel(codes: string[], all: LanguageInfo[]): string {
   const name = (c: string) => all.find((l) => l.code === c)?.name ?? c;
   if (codes.length === 0) return "Język: auto";
@@ -11,9 +11,9 @@ export function languagesLabel(codes: string[], all: LanguageInfo[]): string {
 }
 
 /**
- * Czy wybrany model przepisze w tych językach (lustro `Engine::check_languages`).
- * `error` blokuje przepisywanie, `warning` ostrzega zawsze, `hint` tylko wyjaśnia wybór
- * (pokazujemy go dopiero, gdy użytkownik sam wybrał języki).
+ * Whether the selected model can transcribe in these languages (mirrors `Engine::check_languages`).
+ * `error` blocks transcription, `warning` always warns, `hint` only explains the choice
+ * (shown only once the user has picked languages themselves).
  */
 export function languageCheck(engine: EngineId | null, codes: string[], all: LanguageInfo[]): { error?: string; warning?: string; hint?: string } {
   if (!engine || engine.startsWith("whisper")) {
@@ -37,7 +37,7 @@ export function languageCheck(engine: EngineId | null, codes: string[], all: Lan
   return {};
 }
 
-/** Wybór języków przepisywania: żaden (model rozpoznaje sam), jeden albo kilka (rozmowa mieszana). */
+/** Transcription language picker: none (the model detects it), one, or several (mixed-language conversation). */
 export default function LanguagePicker({
   value,
   languages,

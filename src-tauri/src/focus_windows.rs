@@ -1,4 +1,4 @@
-//! Windows: element z fokusem przez UI Automation.
+//! Windows: the focused element via UI Automation.
 use uiautomation::patterns::{UITextPattern, UIValuePattern};
 use uiautomation::UIAutomation;
 
@@ -17,7 +17,7 @@ pub fn snapshot() -> super::Snapshot {
         snap.value_settable = v.is_readonly().map(|r| !r).unwrap_or(false);
     }
     snap.has_text_range = el.get_pattern::<UITextPattern>().is_ok();
-    // Lista plików Eksploratora (klasy okien powłoki) — wklejanie tekstu nie ma tam sensu.
+    // Explorer's file list (shell window classes) — pasting text makes no sense there.
     if let Ok(class) = el.get_classname() {
         if matches!(class.as_str(), "DirectUIHWND" | "SysListView32" | "UIItemsView") {
             snap.app = Some("explorer.exe".into());

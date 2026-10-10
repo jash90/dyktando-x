@@ -1,4 +1,4 @@
-//! Komendy interfejsu dla spotkań i AI.
+//! UI commands for meetings and AI.
 use serde::Serialize;
 use std::collections::BTreeMap;
 use tauri::{AppHandle, Emitter, Manager};
@@ -24,12 +24,12 @@ fn changed(app: &AppHandle) {
     crate::refresh_tray(app);
 }
 
-/// Zdarzenie transkrypcji na żywo dla interfejsu (`meeting-live`).
+/// Live transcription event for the UI (`meeting-live`).
 #[derive(Clone, Serialize)]
 pub struct LivePayload {
     meeting_id: String,
     utterance: Option<Utterance>,
-    /// Tekst roboczy trwającej wypowiedzi (zastępuje poprzedni roboczy tej ścieżki; pusty = usuń).
+    /// Draft text of the ongoing utterance (replaces this track's previous draft; empty = remove).
     partial: Option<Utterance>,
     error: Option<String>,
 }
@@ -72,7 +72,7 @@ pub fn stop_meeting_inner(app: &AppHandle) -> Result<Meeting, String> {
     Ok(meeting)
 }
 
-/// Z menu i ze skrótu: start albo stop, błędy w dymku.
+/// From the menu and the shortcut: start or stop, errors in the bubble.
 pub fn toggle_meeting_from(app: &AppHandle) {
     let recording = app.state::<AppState>().recorder.is_recording();
     let r = if recording { stop_meeting_inner(app) } else { start_meeting_inner(app) };
@@ -86,13 +86,13 @@ pub fn meeting_status(state: tauri::State<AppState>) -> RecordingStatus {
     state.recorder.status()
 }
 
-/// Wypowiedzi przepisane na żywo w trwającym nagraniu (okno otwarte w trakcie spotkania).
+/// Utterances transcribed live in the ongoing recording (window opened during a meeting).
 #[tauri::command]
 pub fn live_transcript(state: tauri::State<AppState>) -> Vec<Utterance> {
     state.recorder.live_utterances()
 }
 
-/// Zamknięcie okna „na żywo” przez użytkownika (nagranie trwa dalej; okno wróci przy następnym).
+/// The user closed the "live" window (recording continues; it comes back with the next one).
 #[tauri::command]
 pub fn hide_live_window(app: AppHandle) {
     crate::live_window::hide(&app);
@@ -125,7 +125,7 @@ pub struct MeetingDetail {
     transcript: Option<String>,
     summaries: Vec<SummaryFile>,
     folder: String,
-    /// Ścieżki z nagraniem, które można pobrać jako WAV.
+    /// Tracks with a recording that can be downloaded as WAV.
     tracks: Vec<Track>,
 }
 
@@ -136,7 +136,7 @@ fn track_prefix(track: Track) -> &'static str {
     }
 }
 
-/// Co pobrać: jedną ścieżkę albo obie zmiksowane w jedno nagranie rozmowy.
+/// What to download: a single track or both mixed into one conversation recording.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AudioExport {
@@ -155,8 +155,8 @@ impl AudioExport {
     }
 }
 
-/// Ścieżki, które mają jakiekolwiek próbki (import ma tylko `system`, spotkanie bez dźwięku
-/// aplikacji tylko `mic`; po usunięciu nagrania nie ma żadnej).
+/// Tracks that have any samples at all (an import has only `system`, a meeting without app
+/// audio only `mic`; after the recording is deleted there are none).
 fn exportable_tracks(s: &Store, m: &Meeting) -> Vec<Track> {
     if m.audio_deleted {
         return Vec::new();
@@ -208,8 +208,8 @@ pub fn reveal_meeting(app: AppHandle, id: String) -> Result<(), String> {
     app.opener().reveal_item_in_dir(target).map_err(|e| e.to_string())
 }
 
-/// Zapisuje ścieżkę spotkania (mikrofon, rozmówcy albo obie zmiksowane) jako jeden plik WAV
-/// we wskazanym miejscu. Zwraca ścieżkę pliku; `None` = użytkownik zamknął okno bez wyboru.
+/// Saves a meeting track (microphone, other participants, or both mixed) as a single WAV file
+/// at the chosen location. Returns the file path; `None` = the user closed the dialog unchosen.
 #[tauri::command]
 pub async fn export_meeting_audio(app: AppHandle, id: String, track: AudioExport) -> Result<Option<String>, String> {
     use tauri_plugin_dialog::DialogExt;
@@ -245,8 +245,8 @@ pub async fn export_meeting_audio(app: AppHandle, id: String, track: AudioExport
         .map_err(|e| e.to_string())
 }
 
-/// Okno wyboru pliku z nagraniem rozmowy → nowe spotkanie (wczytanie i transkrypcja w tle).
-/// `None` = użytkownik zamknął okno bez wyboru.
+/// File picker for a conversation recording → new meeting (loading and transcription in background).
+/// `None` = the user closed the dialog without choosing.
 #[tauri::command]
 pub async fn import_meeting(app: AppHandle) -> Result<Option<Meeting>, String> {
     use tauri_plugin_dialog::DialogExt;
@@ -310,13 +310,13 @@ pub fn ai_providers() -> Vec<ProviderInfo> {
         .collect()
 }
 
-/// Zapis klucza w systemowym magazynie (pusty = usunięcie). Klucz nigdy nie wraca do interfejsu.
+/// Stores the key in the system store (empty = delete). The key never goes back to the UI.
 #[tauri::command]
 pub fn set_ai_key(provider: ProviderId, key: String) -> Result<(), String> {
     keys::set(provider, key.trim()).map_err(|e| e.to_string())
 }
 
-/// „Testuj połączenie”: lista modeli dostawcy (sprawdza klucz i adres).
+/// "Testuj połączenie" (Test connection): the provider's model list (checks the key and URL).
 #[tauri::command]
 pub async fn test_ai(app: AppHandle, provider: ProviderId) -> Result<Vec<String>, String> {
     let settings = app.state::<AppState>().settings.lock().unwrap().clone();
@@ -336,17 +336,17 @@ pub fn ai_key_status() -> BTreeMap<ProviderId, bool> {
     ProviderId::ALL.iter().map(|&id| (id, keys::has(id))).collect()
 }
 
-/// Import kluczy z Dyktando dla macOS (wersja Swift).
+/// Import of keys from Dyktando for macOS (the Swift version).
 #[tauri::command]
 pub fn import_legacy_keys() -> Vec<&'static str> {
     keys::import_legacy()
 }
 
-// MARK: - Podpowiedź „Wykryto spotkanie”
+// MARK: - "Wykryto spotkanie" (Meeting detected) prompt
 
 pub const PROMPT_LABEL: &str = "prompt";
 
-/// Małe okno w prawym górnym rogu; nie przejmuje fokusu (rozmowa trwa w innej aplikacji).
+/// Small window in the top-right corner; doesn't steal focus (the call is going on in another app).
 pub fn show_meeting_prompt(app: &AppHandle, app_name: &str) {
     if let Some(w) = app.get_webview_window(PROMPT_LABEL) {
         let _ = w.close();
@@ -373,7 +373,7 @@ pub fn show_meeting_prompt(app: &AppHandle, app_name: &str) {
         let _ = w.set_position(tauri::PhysicalPosition::new(x, y));
     }
     let _ = w.show();
-    // Bez odpowiedzi podpowiedź znika po 30 s.
+    // Without a response the prompt disappears after 30 s.
     let app = app.clone();
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_secs(30));

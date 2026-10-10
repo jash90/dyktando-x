@@ -3,10 +3,10 @@ import { listen } from "@tauri-apps/api/event";
 import { FileText, Square, X } from "lucide-react";
 import { clock, draftList, meetingsApi, nextDrafts, type LiveDrafts, type LivePayload, type RecordingStatus, type Utterance } from "../api";
 
-/** Ile ostatnich wypowiedzi trzymamy w małym oknie. */
+/** How many recent utterances to keep in the small window. */
 const KEEP = 60;
 
-/** Okno „na żywo” w trakcie nagrania: licznik, poziomy obu ścieżek, ostatnie wypowiedzi. */
+/** The "live" window during recording: timer, levels of both tracks, recent utterances. */
 export default function LiveWindow() {
   const [status, setStatus] = useState<RecordingStatus | null>(null);
   const [items, setItems] = useState<Utterance[]>([]);

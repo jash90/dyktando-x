@@ -1,5 +1,5 @@
-//! Postprocessing dyktowania (port `Postprocess/` ze Swifta): znaczniki dyktowania →
-//! kropka na końcu dłuższej wypowiedzi → wielkie litery po zdaniach → sprzątanie spacji.
+//! Dictation postprocessing (a port of `Postprocess/` from the Swift version): dictation markers →
+//! period at the end of a longer utterance → capitalization after sentences → whitespace cleanup.
 
 const RULES: &[(&str, &str)] = &[
     ("kropka", "."),
@@ -12,7 +12,7 @@ const RULES: &[(&str, &str)] = &[
     ("średnik", ";"),
 ];
 
-/// Zamienia znaczniki występujące jako osobne słowa (otoczone spacjami).
+/// Replaces markers that occur as separate words (surrounded by spaces).
 pub fn replace_markers(text: &str) -> String {
     let mut out = format!(" {text} ");
     for (marker, replacement) in RULES {
@@ -25,8 +25,8 @@ pub fn replace_markers(text: &str) -> String {
     out.trim_matches(' ').to_string()
 }
 
-/// Kropka na końcu, gdy brak znaku końca zdania i wypowiedź ma ≥ 6 słów
-/// (Whisper sam stawia interpunkcję, Parakeet często nie).
+/// A period at the end when there's no sentence-ending mark and the utterance has ≥ 6 words
+/// (Whisper adds punctuation itself, Parakeet often doesn't).
 pub fn punctuate(text: &str) -> String {
     let trimmed = text.trim();
     let Some(last) = trimmed.chars().last() else {
@@ -42,7 +42,7 @@ pub fn punctuate(text: &str) -> String {
     }
 }
 
-/// Wielka litera na początku i po każdym `.`, `!`, `?`; zachowuje polskie znaki.
+/// Capital letter at the start and after every `.`, `!`, `?`; preserves Polish characters.
 pub fn capitalize(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut next = true;
@@ -68,7 +68,7 @@ fn smart_space(s: &str) -> String {
     while s.contains("  ") {
         s = s.replace("  ", " ");
     }
-    // Nowa linia z dyktowania nie powinna zostawiać spacji na końcu i na początku wiersza.
+    // A dictated new line shouldn't leave spaces at the end and start of a line.
     s.replace(" \n", "\n").replace("\n ", "\n")
 }
 

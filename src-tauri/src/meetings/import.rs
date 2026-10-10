@@ -1,8 +1,8 @@
-//! Import nagranej rozmowy z pliku audio (MP3, M4A/AAC, WAV, FLAC, OGG Vorbis/Opus, AIFF, CAF…).
-//! Plik jest dekodowany strumieniowo (nic nie rośnie w RAM), uśredniany do mono, przeliczany na
-//! 16 kHz i zapisywany jako ścieżka „system” spotkania — w zwykłym nagraniu nie da się oddzielić
-//! własnego głosu, więc wszyscy są rozmówcami, a rozpoznawanie mówców nadaje im etykiety
-//! „Rozmówca 1, 2…”. Dalej działa zwykła transkrypcja spotkania.
+//! Importing a recorded call from an audio file (MP3, M4A/AAC, WAV, FLAC, OGG Vorbis/Opus, AIFF, CAF…).
+//! The file is decoded as a stream (nothing grows in RAM), downmixed to mono, resampled to
+//! 16 kHz and saved as the meeting's "system" track — in a plain recording you can't separate
+//! your own voice, so everyone is a participant, and speaker recognition gives them the labels
+//! "Rozmówca 1, 2…" ("Participant 1, 2…"). From there the regular meeting transcription runs.
 use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Local};
 use std::path::Path;
@@ -20,11 +20,11 @@ use super::store::{Meeting, State, Store, SYSTEM};
 use super::writer::{SegmentedWriter, RATE};
 use crate::audio::resample::{downmix, StreamResampler};
 
-/// Rozszerzenia do filtra w oknie wyboru pliku.
+/// Extensions for the file picker filter.
 pub const EXTENSIONS: &[&str] = &["mp3", "m4a", "mp4", "aac", "wav", "flac", "ogg", "oga", "aif", "aiff", "caf", "mka", "webm", "opus"];
 
-/// Kodeki Symphonii + Opus przez libopus (Symphonia nie ma własnego dekodera Opus, a w nim są
-/// notatki głosowe z WhatsAppa i Telegrama).
+/// Symphonia codecs + Opus via libopus (Symphonia has no Opus decoder of its own, and that's the
+/// format of WhatsApp and Telegram voice notes).
 static CODECS: Lazy<CodecRegistry> = Lazy::new(|| {
     let mut registry = CodecRegistry::new();
     symphonia::default::register_enabled_codecs(&mut registry);
@@ -32,8 +32,8 @@ static CODECS: Lazy<CodecRegistry> = Lazy::new(|| {
     registry
 });
 
-/// Dekoduje plik i oddaje kolejne porcje mono w częstotliwości źródła: `(częstotliwość, próbki,
-/// postęp 0..=1 jeśli znana długość)`.
+/// Decodes the file and yields successive mono chunks at the source rate: `(rate, samples,
+/// progress 0..=1 if the duration is known)`.
 pub fn decode(path: &Path, cancel: &AtomicBool, mut on_chunk: impl FnMut(u32, &[f32], Option<f32>) -> Result<()>) -> Result<()> {
     let file = std::fs::File::open(path).with_context(|| format!("otwieranie {}", path.display()))?;
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
@@ -69,7 +69,7 @@ pub fn decode(path: &Path, cancel: &AtomicBool, mut on_chunk: impl FnMut(u32, &[
         }
         let decoded = match decoder.decode(&packet) {
             Ok(d) => d,
-            // Uszkodzony pakiet — pomijamy, reszta nagrania jest cenniejsza.
+            // Corrupted packet — skip it, the rest of the recording is more valuable.
             Err(DecodeError::DecodeError(e)) => {
                 log::warn!("import: pominięty pakiet ({e})");
                 continue;
@@ -91,8 +91,8 @@ pub fn decode(path: &Path, cancel: &AtomicBool, mut on_chunk: impl FnMut(u32, &[
     Ok(())
 }
 
-/// Tworzy spotkanie dla importowanego pliku (stan `importing`, data = data modyfikacji pliku,
-/// tytuł = nazwa pliku). Audio dopisuje `fill`.
+/// Creates a meeting for the imported file (state `importing`, date = file modification date,
+/// title = file name). The audio is appended by `fill`.
 pub fn create(store: &Store, path: &Path) -> Result<Meeting> {
     if !path.is_file() {
         return Err(anyhow!("Nie ma takiego pliku: {}", path.display()));
@@ -106,15 +106,15 @@ pub fn create(store: &Store, path: &Path) -> Result<Meeting> {
     })
 }
 
-/// Dekoduje plik do ścieżki „system” spotkania i oznacza je jako nagrane. Przy błędzie albo
-/// przerwaniu usuwa spotkanie (oryginalny plik zostaje nietknięty).
+/// Decodes the file into the meeting's "system" track and marks it as recorded. On error or
+/// cancellation it deletes the meeting (the original file is left untouched).
 pub fn fill(store: &Store, meeting: &Meeting, path: &Path, cancel: &AtomicBool, mut progress: impl FnMut(f32)) -> Result<Meeting> {
     let result = (|| -> Result<u64> {
         let mut writer = SegmentedWriter::new(&store.audio_folder(&meeting.id), SYSTEM)?;
         let mut resampler: Option<(u32, StreamResampler)> = None;
         decode(path, cancel, |rate, mono, fraction| {
             if resampler.as_ref().is_none_or(|(r, _)| *r != rate) {
-                // Pierwsza porcja albo zmiana częstotliwości w środku pliku (rzadkie, ale bywa).
+                // First chunk, or a sample rate change mid-file (rare, but it happens).
                 if let Some((_, mut old)) = resampler.take() {
                     writer.append(&old.flush())?;
                 }
@@ -179,8 +179,8 @@ mod tests {
         assert_eq!(got, expected);
     }
 
-    /// Stereo 44,1 kHz (jak typowy eksport z dyktafonu) → spotkanie z jedną ścieżką 16 kHz tej
-    /// samej długości; mowa tylko w prawym kanale nie może zniknąć przy miksowaniu.
+    /// Stereo 44.1 kHz (like a typical voice recorder export) → a meeting with one 16 kHz track of
+    /// the same length; speech only in the right channel must not disappear when mixing down.
     #[test]
     fn imports_stereo_44k_file_as_system_track() {
         let s = store();
@@ -190,8 +190,8 @@ mod tests {
         let mut w = hound::WavWriter::create(&path, spec).unwrap();
         for i in 0..44_100 * 3 {
             let tone = ((i as f32 * 440.0 * std::f32::consts::TAU / 44_100.0).sin() * 12_000.0) as i16;
-            w.write_sample(0i16).unwrap(); // lewy: cisza
-            w.write_sample(tone).unwrap(); // prawy: sygnał
+            w.write_sample(0i16).unwrap(); // left: silence
+            w.write_sample(tone).unwrap(); // right: signal
         }
         w.finalize().unwrap();
 
@@ -229,7 +229,7 @@ mod tests {
         std::fs::remove_dir_all(&s.root).ok();
     }
 
-    /// Formaty skompresowane, jak z telefonu/dyktafonu/komunikatora (wymaga `ffmpeg` w PATH):
+    /// Compressed formats, as from a phone/voice recorder/messenger (requires `ffmpeg` in PATH):
     /// `cargo test --lib -- --ignored import_compressed --nocapture`.
     #[test]
     #[ignore]
@@ -250,8 +250,8 @@ mod tests {
         std::fs::remove_dir_all(&s.root).ok();
     }
 
-    /// Cały tok jak w aplikacji: rozmowa dwóch osób w MP3 → import → transkrypcja z rozpoznawaniem
-    /// mówców. Wymaga modeli i `ffmpeg`: `cargo test --lib -- --ignored import_then --nocapture`.
+    /// The whole flow as in the app: a two-person call in MP3 → import → transcription with speaker
+    /// recognition. Requires models and `ffmpeg`: `cargo test --lib -- --ignored import_then --nocapture`.
     #[test]
     #[ignore]
     fn import_then_transcribe_two_speakers() {

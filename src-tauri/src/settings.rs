@@ -1,5 +1,5 @@
-//! Ustawienia aplikacji w `settings.json` (odpowiednik `Preferences` ze Swifta).
-//! Brakujące pola dostają wartości domyślne, więc stare pliki zawsze się wczytają.
+//! App settings in `settings.json` (the counterpart of `Preferences` in the Swift version).
+//! Missing fields get default values, so old files always load.
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -12,7 +12,7 @@ pub enum Language {
     #[default]
     Pl,
     En,
-    /// Silnik sam rozpoznaje język (polski z wtrąceniami angielskimi itp.).
+    /// The engine detects the language itself (Polish with English insertions, etc.).
     Auto,
 }
 
@@ -29,7 +29,7 @@ impl Language {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum PasteMode {
-    /// Wklejaj, chyba że fokus na pewno nie jest w polu tekstowym.
+    /// Paste unless the focus is definitely not in a text field.
     #[default]
     Auto,
     Always,
@@ -75,8 +75,8 @@ impl ProviderId {
         }
     }
 
-    /// Domyślny model tylko tam, gdzie jest pewny; u pozostałych użytkownik wybiera z listy
-    /// pobranej przez „Testuj połączenie” (nazwy modeli tych dostawców często się zmieniają).
+    /// A default model only where it's certain; for the others the user picks from the list
+    /// fetched via "Testuj połączenie" (Test connection); these providers' model names change often.
     pub fn default_model(self) -> &'static str {
         match self {
             Self::Anthropic => "claude-opus-5-5",
@@ -93,7 +93,7 @@ impl ProviderId {
         }
     }
 
-    /// Ile znaków transkryptu mieści się w jednym zapytaniu (polski ≈ 3 znaki/token).
+    /// How many transcript characters fit in one request (Polish ≈ 3 characters/token).
     pub fn chunk_characters(self) -> usize {
         if self == Self::Anthropic { 1_200_000 } else { 180_000 }
     }
@@ -102,9 +102,9 @@ impl ProviderId {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct ProviderConfig {
-    /// Puste = domyślny model dostawcy.
+    /// Empty = the provider's default model.
     pub model: String,
-    /// Puste = domyślny adres API.
+    /// Empty = the default API URL.
     pub base_url: String,
 }
 
@@ -112,32 +112,32 @@ pub struct ProviderConfig {
 #[serde(default)]
 pub struct Settings {
     pub engine: EngineId,
-    /// Język dyktowania.
+    /// Dictation language.
     pub language: Language,
-    /// Nazwa urządzenia wejściowego; `None` = domyślne systemowe.
+    /// Input device name; `None` = the system default.
     pub input_device: Option<String>,
-    /// Skrót „przytrzymaj, aby mówić” (format handy-keys, np. `F5`, `Ctrl+Alt+Space`).
+    /// "Hold to talk" shortcut (handy-keys format, e.g. `F5`, `Ctrl+Alt+Space`).
     pub shortcut_push_to_talk: String,
-    /// Skrót „naciśnij, aby zacząć / zakończyć”; pusty = wyłączony.
+    /// "Press to start / stop" shortcut; empty = disabled.
     pub shortcut_toggle: String,
-    /// Sam modyfikator jako push-to-talk, np. `CmdRight`, `CtrlRight`; pusty = wyłączony.
+    /// A lone modifier as push-to-talk, e.g. `CmdRight`, `CtrlRight`; empty = disabled.
     pub modifier_push_to_talk: String,
     pub paste_mode: PasteMode,
     pub hud_enabled: bool,
-    /// Zapisuj każde dyktowanie (tekst i nagranie) w historii — lokalnie, jak spotkania.
+    /// Save every dictation (text and recording) to history — locally, like meetings.
     pub dictation_history: bool,
 
-    /// Model do przepisywania po nagraniu (i importu).
+    /// Model for transcription after recording (and for imports).
     pub meeting_engine: EngineId,
-    /// Model transkrypcji na żywo — tu liczy się szybkość, po nagraniu jakość.
+    /// Live transcription model — speed matters here; after recording, quality does.
     pub meeting_live_engine: EngineId,
-    /// Język spotkań (transkrypcja po nagraniu, na żywo, import; źródło tłumaczenia na żywo).
+    /// Meeting language (transcription after recording, live, import; source of live translation).
     pub meeting_language: Language,
-    /// Przepisuj wypowiedzi w trakcie nagrania (tekst pojawia się chwilę po każdej pauzie).
+    /// Transcribe utterances during recording (text appears shortly after each pause).
     pub meeting_live_transcription: bool,
-    /// Kod języka tłumaczenia na żywo (np. „en”); pusty = bez tłumaczenia. Wymaga Canary.
+    /// Language code for live translation (e.g. "en"); empty = no translation. Requires Canary.
     pub meeting_live_translate_to: String,
-    /// Małe okno zawsze na wierzchu z licznikiem, poziomami i tekstem na żywo w trakcie nagrania.
+    /// Small always-on-top window with a timer, levels and live text during recording.
     pub meeting_live_window: bool,
     pub meeting_diarization: bool,
     pub meeting_auto_transcribe: bool,
@@ -147,13 +147,13 @@ pub struct Settings {
     pub meeting_consent_reminder: bool,
     pub shortcut_meeting: String,
 
-    /// Słownik nazw i terminów (np. „NPaw, Hisense, Tizen, CI/CD”) — podpowiedź dla Whispera
-    /// przy dyktowaniu i spotkaniach.
+    /// Dictionary of names and terms (e.g. "NPaw, Hisense, Tizen, CI/CD") — a hint for Whisper
+    /// in dictation and meetings.
     pub vocabulary: String,
 
     pub ai_provider: ProviderId,
     pub ai_providers: BTreeMap<ProviderId, ProviderConfig>,
-    /// Pusty = domyślny prompt podsumowania.
+    /// Empty = the default summary prompt.
     pub ai_prompt: String,
 }
 
@@ -169,8 +169,8 @@ impl Default for Settings {
             paste_mode: PasteMode::Auto,
             hud_enabled: true,
             dictation_history: true,
-            // Whisper turbo robi w rozmowach wyraźnie mniej błędów (porównanie na nagraniu daily:
-            // 12,8% vs 19,6% słów u Parakeeta); po nagraniu czas nie gra roli.
+            // Whisper turbo makes clearly fewer errors in conversations (compared on a daily recording:
+            // 12.8% vs 19.6% word errors for Parakeet); after recording, time doesn't matter.
             meeting_engine: EngineId::WhisperTurbo,
             meeting_live_engine: EngineId::ParakeetV3,
             meeting_language: Language::Pl,
@@ -197,9 +197,9 @@ impl Settings {
         std::fs::read(paths::settings_file()).ok().and_then(|b| Self::parse(&b)).unwrap_or_default()
     }
 
-    /// Stare pliki działają po aktualizacji tak samo jak wcześniej: sprzed osobnego języka
-    /// spotkań — spotkania dostają dotychczasowy wspólny język; sprzed osobnego modelu na żywo —
-    /// na żywo zostaje model spotkań.
+    /// Old files behave after an update the same as before: from before the separate meeting
+    /// language — meetings get the previous shared language; from before the separate live model —
+    /// live keeps the meeting model.
     fn parse(bytes: &[u8]) -> Option<Self> {
         let value: serde_json::Value = serde_json::from_slice(bytes).ok()?;
         let has_meeting_language = value.get("meeting_language").is_some();
@@ -259,7 +259,7 @@ mod tests {
         assert_eq!((s.meeting_engine, s.meeting_live_engine), (EngineId::CanaryV2, EngineId::CanaryV2));
         let s = Settings::parse(br#"{"meeting_engine":"whisper_turbo","meeting_live_engine":"parakeet_v3"}"#).unwrap();
         assert_eq!((s.meeting_engine, s.meeting_live_engine), (EngineId::WhisperTurbo, EngineId::ParakeetV3));
-        // Nowa instalacja: Whisper po nagraniu, Parakeet na żywo.
+        // Fresh install: Whisper after recording, Parakeet live.
         let d = Settings::default();
         assert_eq!((d.meeting_engine, d.meeting_live_engine), (EngineId::WhisperTurbo, EngineId::ParakeetV3));
     }

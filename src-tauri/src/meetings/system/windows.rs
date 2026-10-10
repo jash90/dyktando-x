@@ -1,5 +1,5 @@
-//! WASAPI process loopback (Windows 10 build 20348+ / Windows 11): cały dźwięk systemu
-//! z wyjątkiem drzewa procesów Dyktando X. Starsze systemy zwracają błąd aktywacji.
+//! WASAPI process loopback (Windows 10 build 20348+ / Windows 11): all system audio except
+//! the Dyktando X process tree. Older systems return an activation error.
 use anyhow::{anyhow, Result};
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -40,7 +40,7 @@ impl Capture {
         }
     }
 
-    /// Process loopback nie jest przypięty do konkretnego wyjścia — nie ma czego pilnować.
+    /// Process loopback isn't bound to a specific output — there's nothing to watch.
     pub fn device_changed(&self) -> bool {
         false
     }
@@ -67,7 +67,7 @@ fn run(mut sink: Sink, stop: &AtomicBool, ready: &mpsc::Sender<Result<(), String
     let _ = initialize_mta();
     let format = WaveFormat::new(32, 32, &SampleType::Float, RATE, CHANNELS, None);
     let block_align = format.get_blockalign() as usize;
-    // include_tree = false → PROCESS_LOOPBACK_MODE_EXCLUDE_TARGET_PROCESS_TREE: wszystko poza nami.
+    // include_tree = false → PROCESS_LOOPBACK_MODE_EXCLUDE_TARGET_PROCESS_TREE: everything except us.
     let mut client = AudioClient::new_application_loopback_client(std::process::id(), false).map_err(|e| anyhow!("{e}"))?;
     let mode = StreamMode::EventsShared { autoconvert: true, buffer_duration_hns: 0 };
     client.initialize_client(&format, &Direction::Capture, &mode).map_err(|e| anyhow!("{e}"))?;
@@ -96,7 +96,7 @@ fn run(mut sink: Sink, stop: &AtomicBool, ready: &mpsc::Sender<Result<(), String
             }
             sink(&mono);
         }
-        // Przy ciszy loopback nie wysyła zdarzeń — limit czasu to nie błąd.
+        // During silence the loopback sends no events — a timeout is not an error.
         let _ = event.wait_for_event(200);
     }
     let _ = client.stop_stream();
