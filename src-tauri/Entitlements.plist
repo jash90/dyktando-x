@@ -2,7 +2,7 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <!-- Bez tego przy hardened runtime macOS zwraca z mikrofonu same zera i nawet nie pyta o zgodę. -->
+  <!-- Without this, under the hardened runtime macOS returns all zeros from the microphone and never even asks for permission. -->
   <key>com.apple.security.device.audio-input</key>
   <true/>
 </dict>

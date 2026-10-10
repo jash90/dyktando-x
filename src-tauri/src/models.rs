@@ -1,5 +1,5 @@
-//! Katalog modeli i pobieranie. Każdy model to zestaw plików w `models/<katalog>/`;
-//! model jest zainstalowany, gdy wszystkie pliki istnieją (pobieranie idzie do `.part`).
+//! Model catalog and downloading. Each model is a set of files in `models/<dir>/`;
+//! a model is installed when all its files exist (downloads go to `.part`).
 use anyhow::{anyhow, Context, Result};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
@@ -30,9 +30,9 @@ impl EngineId {
 #[serde(rename_all = "snake_case", tag = "kind", content = "engine")]
 pub enum AssetId {
     Engine(EngineId),
-    /// Silero VAD v4 — dzielenie nagrań spotkań na wypowiedzi.
+    /// Silero VAD v4 — splitting meeting recordings into utterances.
     SileroVad,
-    /// WeSpeaker ResNet34 — rozpoznawanie mówców w nagraniach spotkań.
+    /// WeSpeaker ResNet34 — speaker recognition in meeting recordings.
     SpeakerModel,
 }
 
@@ -92,7 +92,7 @@ pub static ASSETS: &[Asset] = &[
             canary!("encoder-model.int8.onnx", 859_078_138),
             canary!("decoder-model.int8.onnx", 170_040_374),
             canary!("vocab.txt", 208_022),
-            // Ten sam preprocesor 128 mel co Parakeet (repo Canary go nie zawiera).
+            // The same 128-mel preprocessor as Parakeet (the Canary repo doesn't include it).
             parakeet!("nemo128.onnx", 139_764),
         ],
     },
@@ -171,8 +171,8 @@ impl Asset {
         Ok(())
     }
 
-    /// Pobiera brakujące pliki. `progress(pobrane, razem)` — w bajtach dla całego modelu.
-    /// `cancel` przerywa między porcjami danych (plik `.part` zostaje do wznowienia… od zera).
+    /// Downloads missing files. `progress(downloaded, total)` — in bytes for the whole model.
+    /// `cancel` aborts between data chunks (the `.part` file stays for resuming… from scratch).
     pub async fn download(&self, cancel: &AtomicBool, mut progress: impl FnMut(u64, u64)) -> Result<()> {
         let dir = self.dir_path();
         tokio::fs::create_dir_all(&dir).await?;

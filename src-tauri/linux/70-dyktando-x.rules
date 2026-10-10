@@ -1,5 +1,5 @@
-# Dyktando X: skróty globalne czytają klawiaturę z /dev/input (działa na X11 i Waylandzie),
-# a blokowanie skrótów i wklejanie przez dotool/ydotool potrzebuje /dev/uinput.
-# „uaccess” daje dostęp tylko zalogowanemu przy komputerze użytkownikowi (nie przez SSH).
+# Dyktando X: global shortcuts read the keyboard from /dev/input (works on X11 and Wayland),
+# while blocking shortcuts and pasting via dotool/ydotool needs /dev/uinput.
+# "uaccess" grants access only to the user logged in at the machine (not over SSH).
 KERNEL=="uinput", TAG+="uaccess"
 SUBSYSTEM=="input", KERNEL=="event*", TAG+="uaccess"

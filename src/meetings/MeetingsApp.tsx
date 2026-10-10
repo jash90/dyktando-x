@@ -74,7 +74,7 @@ export default function MeetingsApp() {
     return () => uns.forEach((u) => u.then((f) => f()));
   }, [refreshList]);
 
-  // Okno otwarte w trakcie spotkania: dociągnij to, co już przepisano; po nagraniu wyczyść.
+  // Window opened during a meeting: fetch what has already been transcribed; clear it after recording.
   useEffect(() => {
     if (status?.recording) {
       meetingsApi.liveTranscript().then((u) => setLive((prev) => (prev.length > u.length ? prev : u)));
@@ -193,14 +193,14 @@ export default function MeetingsApp() {
   );
 }
 
-/** Pobieranie nagrania: mikrofon to Ty, dźwięk aplikacji to rozmówcy, całość to obie ścieżki zmiksowane. */
+/** Recording download: microphone = you, app audio = the other participants, full = both tracks mixed. */
 const EXPORTS: { track: AudioExport; needs: AudioTrack[]; label: string; title: string }[] = [
   { track: "mic", needs: ["mic"], label: "Mój głos", title: "Pobierz nagranie z mikrofonu (to, co mówisz) jako WAV" },
   { track: "system", needs: ["system"], label: "Rozmówcy", title: "Pobierz nagranie rozmówców (dźwięk aplikacji) jako WAV" },
   { track: "mixed", needs: ["mic", "system"], label: "Całe nagranie", title: "Pobierz całą rozmowę (Ty i rozmówcy w jednym pliku) jako WAV" },
 ];
 
-/** „Nagranie ▾” — pobranie ścieżki albo całej rozmowy jako WAV. */
+/** „Nagranie ▾” ("Recording ▾") — download a single track or the whole conversation as WAV. */
 function DownloadMenu({
   tracks,
   disabled,
@@ -291,7 +291,7 @@ function Detail({
   const [exporting, setExporting] = useState<AudioExport | null>(null);
   const [allLanguages, setAllLanguages] = useState<LanguageInfo[]>([]);
   const [defaultLanguages, setDefaultLanguages] = useState<string[]>([]);
-  // Wybór użytkownika; `null` = jak przy ostatniej transkrypcji, a bez niej jak w ustawieniach.
+  // User's choice; `null` = same as the last transcription, or the settings if there was none.
   const [chosenLanguages, setChosenLanguages] = useState<string[] | null>(null);
 
   useEffect(() => {
@@ -533,8 +533,8 @@ function liveText(items: Utterance[]): string {
   return items.map((u) => `[${clock(u.start)}] ${u.speaker}: ${u.text}${u.translation ? `\n    ${u.translation}` : ""}`).join("\n");
 }
 
-/// Transkrypcja na żywo: domknięte wypowiedzi i (szarym) tekst roboczy trwających — odświeżany co
-/// ~1,5 s, bez czekania na pauzę. Widok sam przewija do końca.
+/// Live transcription: finalized utterances plus (in grey) draft text of ongoing ones — refreshed every
+/// ~1.5 s, without waiting for a pause. The view auto-scrolls to the end.
 function LiveTranscript({ items, drafts, error }: { items: Utterance[]; drafts: Utterance[]; error: string | null }) {
   const end = useRef<HTMLDivElement>(null);
   useEffect(() => {

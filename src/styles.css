@@ -1,5 +1,5 @@
-/* Dyktando X — „notes stenografa”: ciepły papier i atrament, szeryfowe tytuły, czerwień tylko dla
-   nagrywania i tego, co aktywne. Fonty są wbudowane (aplikacja działa bez internetu). */
+/* Dyktando X — "stenographer's notebook": warm paper and ink, serif headings, red only for
+   recording and whatever is active. Fonts are bundled (the app works offline). */
 
 :root {
   --paper: #f3efe6;
@@ -21,7 +21,7 @@
   --warn-text: #5e4500;
   --shadow: 0 1px 2px rgba(60, 45, 20, 0.06), 0 6px 18px rgba(60, 45, 20, 0.06);
   --pop-shadow: 0 12px 32px rgba(40, 30, 15, 0.18), 0 2px 6px rgba(40, 30, 15, 0.08);
-  /* Kolory mówców (atramenty). */
+  /* Speaker colours (inks). */
   --sp-0: #2b5c87;
   --sp-1: #7a4a96;
   --sp-2: #2f7a4c;
@@ -34,7 +34,7 @@
   --font-display: "Fraunces Variable", Georgia, "Times New Roman", serif;
   --font-mono: "JetBrains Mono Variable", ui-monospace, Menlo, Consolas, monospace;
 
-  /* Zgodność ze starszymi nazwami tokenów. */
+  /* Compatibility with older token names. */
   --bg: var(--paper);
   --panel: var(--sheet);
   --sidebar: var(--rail);
@@ -87,7 +87,7 @@
 
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--paper); }
-/* Ziarno papieru — delikatna faktura zamiast płaskiego tła. */
+/* Paper grain — a subtle texture instead of a flat background. */
 body::before {
   content: "";
   position: fixed;
@@ -103,7 +103,7 @@ button, select, input, textarea { font: inherit; color: inherit; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
 .loading { padding: 32px; color: var(--ink-2); font-family: var(--font-display); font-style: italic; }
 
-/* ——— Układ ——— */
+/* ——— Layout ——— */
 .layout { display: flex; height: 100vh; }
 .sidebar {
   width: 212px;
@@ -161,7 +161,7 @@ button, select, input, textarea { font: inherit; color: inherit; }
 .nav-icon { flex-shrink: 0; opacity: 0.8; }
 .nav.active .nav-icon { opacity: 1; }
 
-/* ——— Typografia ——— */
+/* ——— Typography ——— */
 h1 {
   font-family: var(--font-display);
   font-variation-settings: "opsz" 72;
@@ -184,7 +184,7 @@ h2 {
 .bad { color: var(--bad); font-weight: 600; }
 .error { color: var(--bad); margin-top: 8px; font-size: 12.5px; }
 
-/* ——— Formularze ——— */
+/* ——— Forms ——— */
 .row { padding: 14px 0 16px; margin: 0; border-top: 1px solid var(--rule); max-width: 680px; }
 section > .row:first-of-type { border-top: none; }
 .row > label { display: block; font-weight: 600; margin-bottom: 8px; font-size: 13.5px; }
@@ -241,7 +241,7 @@ textarea { width: 100%; font-size: 13px; line-height: 1.5; resize: vertical; }
 .key.recording { border-color: var(--accent); color: var(--accent-ink); box-shadow: 0 0 0 3px var(--accent-soft); }
 .shortcut { display: inline-flex; gap: 8px; align-items: center; }
 
-/* ——— Przyciski ——— */
+/* ——— Buttons ——— */
 button {
   padding: 6px 13px;
   border-radius: 8px;
@@ -264,7 +264,7 @@ button.icon { border: none; background: none; padding: 6px; color: var(--ink-3);
 button.icon:hover { color: var(--ink); background: var(--hover); }
 button.icon.danger:hover { color: var(--bad); }
 
-/* ——— Karty, plakietki, postęp ——— */
+/* ——— Cards, badges, progress ——— */
 .card { background: var(--sheet); border: 1px solid var(--rule); border-radius: 12px; padding: 14px 16px; margin-bottom: 10px; box-shadow: var(--shadow); max-width: 680px; }
 .card-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
 .card-head .ok { display: inline-flex; gap: 4px; align-items: center; font-size: 12.5px; }
@@ -298,7 +298,7 @@ pre { background: var(--rail); padding: 10px 12px; border-radius: 8px; font-fami
 .inline { display: flex; gap: 6px; align-items: center; }
 .inline input, .inline select { flex: 1; }
 
-/* ——— Dymek (HUD) ——— */
+/* ——— Bubble (HUD) ——— */
 html.hud-root, html.hud-root body { background: transparent; }
 .hud {
   margin: 6px;
@@ -331,7 +331,7 @@ html.hud-root, html.hud-root body { background: transparent; }
 @keyframes pulse { 50% { opacity: 0.35; } }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* ——— Okno spotkań ——— */
+/* ——— Meetings window ——— */
 .meeting-list { width: 286px; gap: 6px; }
 .view-switch { display: flex; gap: 2px; padding: 3px; margin: 0 0 14px; background: var(--paper); border: 1px solid var(--rule); border-radius: 10px; }
 .view-switch button { flex: 1; border: none; background: none; padding: 6px 6px; border-radius: 7px; font-weight: 600; color: var(--ink-2); }
@@ -412,7 +412,7 @@ html.hud-root, html.hud-root body { background: transparent; }
 .chip.mono { font-family: var(--font-mono); font-size: 11.5px; }
 .chip .state { font-size: 12px; }
 
-/* Panel sterowania spotkaniem: transkrypcja i podsumowanie jako dwie czytelne sekcje. */
+/* Meeting control panel: transcription and summary as two clearly separated sections. */
 .controls { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr); gap: 10px; margin: 20px 0 12px; }
 .control { background: var(--sheet); border: 1px solid var(--rule); border-radius: 12px; padding: 10px 12px 12px; box-shadow: var(--shadow); min-width: 0; }
 .control-label {
@@ -438,7 +438,7 @@ html.hud-root, html.hud-root body { background: transparent; }
 .toolbar select { min-width: 0; }
 button { white-space: nowrap; }
 
-/* Menu (języki, pobieranie). */
+/* Menus (languages, download). */
 .lang-picker, .menu { position: relative; }
 .lang-picker > button, .menu > button { display: inline-flex; align-items: center; gap: 6px; }
 .lang-pop, .menu-pop {
@@ -522,7 +522,7 @@ button { white-space: nowrap; }
 .markdown strong { font-weight: 650; }
 .md-quote { margin: 0 0 12px; padding: 6px 12px; border-left: 3px solid var(--rule-strong); color: var(--ink-2); font-size: 12.5px; }
 
-/* Transkrypt: kolumna czasu, mówca, wypowiedź. */
+/* Transcript: time column, speaker, utterance. */
 .transcript-meta { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 18px; }
 .utterances { display: flex; flex-direction: column; }
 .utt { display: grid; grid-template-columns: 62px minmax(0, 1fr); gap: 2px 14px; padding: 8px 0; border-top: 1px solid color-mix(in srgb, var(--rule) 60%, transparent); }
@@ -540,7 +540,7 @@ button { white-space: nowrap; }
 .empty p { font-family: var(--font-display); font-style: italic; font-size: 16px; line-height: 1.5; }
 .empty svg { color: var(--accent); opacity: 0.8; }
 
-/* Dyktowania. */
+/* Dictations. */
 .dictations .detail-head h1 { font-size: 30px; }
 .dict-day h2 { font-family: var(--font-mono); font-weight: 500; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-3); margin: 26px 0 8px; }
 .dict-day h2::first-letter { text-transform: uppercase; }
@@ -566,7 +566,7 @@ button { white-space: nowrap; }
 .dict-entry:hover .dict-actions, .dict-entry:focus-within .dict-actions { opacity: 1; }
 .dict-actions .hint { margin: 0 4px 0 0; }
 
-/* Podpowiedź „Wykryto spotkanie”. */
+/* The „Wykryto spotkanie” ("Meeting detected") prompt. */
 .prompt { margin: 6px; height: 100px; display: flex; gap: 12px; padding: 12px 14px; border-radius: 14px; background: var(--sheet);
   border: 1px solid var(--rule); box-shadow: 0 6px 24px rgba(0, 0, 0, 0.25); }
 .prompt-icon { color: var(--accent); fill: var(--accent); flex-shrink: 0; margin-top: 2px; }
@@ -575,7 +575,7 @@ button { white-space: nowrap; }
 .prompt-body span { color: var(--ink-2); font-size: 12px; }
 .prompt-actions { display: flex; gap: 6px; margin-top: 6px; }
 
-/* Transkrypcja na żywo w oknie spotkań. */
+/* Live transcription in the meetings window. */
 .live { display: flex; flex-direction: column; gap: 10px; }
 .live-line { line-height: 1.5; }
 .live-line time { color: var(--ink-3); font-family: var(--font-mono); font-size: 11px; margin-right: 10px; }
@@ -586,7 +586,7 @@ button { white-space: nowrap; }
 .live-translation { color: var(--ink-2); font-family: var(--font-display); font-style: italic; margin-left: 56px; }
 .live-line.draft { color: var(--ink-3); }
 
-/* Okno „na żywo” (zawsze ciemne, jak lampka „na antenie”). */
+/* The "live" window (always dark, like an "on air" light). */
 .live-win {
   --ink: #efe8da;
   --ink-2: #b4a996;

@@ -1,5 +1,5 @@
-//! Klucze API dostawców AI w pęku kluczy systemu (macOS Keychain, Windows Credential Manager,
-//! Secret Service na Linuksie) — nigdy w `settings.json` ani w logach.
+//! AI provider API keys in the system keychain (macOS Keychain, Windows Credential Manager,
+//! Secret Service on Linux) — never in `settings.json` or in logs.
 use anyhow::Context;
 
 use crate::settings::ProviderId;
@@ -25,18 +25,18 @@ fn get_in(service: &str, account: &str) -> Option<String> {
 }
 
 fn delete_in(service: &str, account: &str) {
-    // Brak wpisu to nie błąd — usuwanie ma być idempotentne.
+    // A missing entry is not an error — deletion must be idempotent.
     if let Ok(e) = entry(service, account) {
         let _ = e.delete_credential();
     }
 }
 
-/// Zapisuje klucz; pusty napis usuwa wpis.
+/// Stores the key; an empty string deletes the entry.
 pub fn set(id: ProviderId, value: &str) -> anyhow::Result<()> {
     set_in(SERVICE, id.key(), value)
 }
 
-/// Klucz dostawcy; `None`, gdy brak albo pusty.
+/// The provider's key; `None` when missing or empty.
 pub fn get(id: ProviderId) -> Option<String> {
     get_in(SERVICE, id.key())
 }
@@ -45,11 +45,11 @@ pub fn has(id: ProviderId) -> bool {
     get(id).is_some()
 }
 
-/// Usługa, pod którą klucze trzyma Dyktando dla macOS (wersja Swift) — konta mają te same nazwy.
+/// Service under which Dyktando for macOS (Swift version) keeps keys — accounts use the same names.
 pub const LEGACY_SERVICE: &str = "com.bartekzimny.dyktando.ai";
 
-/// Jednorazowy import kluczy z Dyktando (Swift): tylko dla dostawców bez własnego klucza.
-/// macOS zapyta o zgodę na odczyt wpisu innej aplikacji. Zwraca nazwy zaimportowanych dostawców.
+/// One-time import of keys from Dyktando (Swift): only for providers without a key of their own.
+/// macOS will ask for consent to read another app's entry. Returns names of imported providers.
 pub fn import_legacy() -> Vec<&'static str> {
     let mut imported = Vec::new();
     for id in ProviderId::ALL {
@@ -69,7 +69,7 @@ pub fn import_legacy() -> Vec<&'static str> {
 mod tests {
     use super::*;
 
-    /// Dotyka prawdziwego pęku kluczy, więc tylko na żądanie: `cargo test -- --ignored keychain`.
+    /// Touches the real keychain, so only on demand: `cargo test -- --ignored keychain`.
     #[test]
     #[ignore]
     fn keychain_round_trip() {

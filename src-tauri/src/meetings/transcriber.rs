@@ -1,6 +1,6 @@
-//! Transkrypcja nagranego spotkania: VAD na obu ścieżkach → każdy fragment przez świeżą
-//! instancję silnika (nie tę od dyktowania) → wektory głosu na ścieżce „system” → grupowanie
-//! mówców → `TranscriptBuilder` → `transcript.md` + `transcript.json`.
+//! Transcription of a recorded meeting: VAD on both tracks → each segment through a fresh
+//! engine instance (not the dictation one) → voice embeddings on the "system" track → speaker
+//! clustering → `TranscriptBuilder` → `transcript.md` + `transcript.json`.
 use anyhow::{anyhow, Result};
 use chrono::Local;
 use serde::Serialize;
@@ -15,15 +15,15 @@ use crate::models::{self, AssetId, EngineId};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Progress {
-    /// Opis kroku po polsku (do paska postępu).
+    /// Step description in Polish (for the progress bar).
     pub step: String,
     /// 0..=1
     pub fraction: f32,
 }
 
-/// Wypowiedź bez treści: same wypełniacze („uh”, „mm-hmm”, „yyy”) albo typowe zmyślenie silnika
-/// na krótkim dźwięku bez słów (oddech, kaszel, potaknięcie). Na nagraniach rozmów każda taka
-/// wypowiedź była osobnym „rozmówcą” albo wtrąceniem w obcym języku (zob. `eval.rs`).
+/// Utterance with no content: only fillers ("uh", "mm-hmm", "yyy") or a typical engine
+/// hallucination on short wordless audio (a breath, a cough, a nod). On call recordings each such
+/// utterance was a separate "participant" or an interjection in a foreign language (see `eval.rs`).
 pub fn is_noise(text: &str, seconds: f64) -> bool {
     const FILLERS: &[&str] = &["uh", "um", "umm", "uhm", "hm", "hmm", "mm", "mmm", "mhm", "hmhm", "yhm", "yyy", "yy", "y", "eee", "ee", "e", "ah", "eh", "oh"];
     const HALLUCINATIONS: &[&str] = &[
@@ -40,16 +40,16 @@ pub fn is_noise(text: &str, seconds: f64) -> bool {
 
 pub struct Options {
     pub engine: EngineId,
-    /// Kody języków (whisper.cpp): puste = silnik rozpoznaje sam, kilka = rozmowa mieszana.
+    /// Language codes (whisper.cpp): empty = the engine detects it, several = mixed-language call.
     pub languages: Vec<String>,
-    /// Słownik nazw i terminów (podpowiedź dla Whispera); pusty = bez.
+    /// Vocabulary of names and terms (a hint for Whisper); empty = none.
     pub vocabulary: String,
     pub diarize: bool,
     pub tuning: Tuning,
 }
 
-/// Parametry przetwarzania. Sprawdzone na nagraniach rozmów (`eval.rs`): dłuższe fragmenty,
-/// większy margines i normalizacja głośności nie zmniejszały błędów — zostają domyślne.
+/// Processing parameters. Tested on call recordings (`eval.rs`): longer segments, a bigger
+/// margin and loudness normalisation didn't reduce errors — the defaults stay.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Tuning {
     pub vad: vad::Params,
@@ -74,7 +74,7 @@ pub fn transcribe(store: &Store, id: &str, opts: &Options, cancel: &AtomicBool, 
     let is_cancelled = || cancel.load(Ordering::Relaxed);
     let check = || if cancel.load(Ordering::Relaxed) { Err(anyhow!("Przerwano")) } else { Ok(()) };
 
-    // 1) Wykrywanie mowy (szybkie: ~1–2 % czasu nagrania).
+    // 1) Speech detection (fast: ~1–2 % of the recording time).
     progress(Progress { step: "Wykrywanie mowy (mikrofon)".into(), fraction: 0.0 });
     let mic_segs = vad::segments(&vad::track_probabilities(&vad_model.file_path(0), &audio, MIC, &is_cancelled)?, opts.tuning.vad);
     let sys_segs = if meeting.has_system_audio {
@@ -87,7 +87,7 @@ pub fn transcribe(store: &Store, id: &str, opts: &Options, cancel: &AtomicBool, 
     let total = (mic_segs.len() + sys_segs.len()).max(1);
     log::info!("Spotkanie {id}: {} fragmentów mikrofonu, {} rozmówców", mic_segs.len(), sys_segs.len());
 
-    // 2) Transkrypcja fragmentów.
+    // 2) Transcription of segments.
     progress(Progress { step: "Wczytywanie modelu".into(), fraction: 0.05 });
     let mut engine = Engine::load(opts.engine)?;
     engine.set_vocabulary(&opts.vocabulary);
@@ -131,7 +131,7 @@ pub fn transcribe(store: &Store, id: &str, opts: &Options, cancel: &AtomicBool, 
     })?;
     drop(engine);
 
-    // 3) Mówcy.
+    // 3) Speakers.
     let speakers: Option<Vec<SpeakerSegment>> = if diarize && !system.is_empty() {
         progress(Progress { step: "Rozpoznawanie mówców".into(), fraction: 0.98 });
         let groups = diarize::cluster(&voices, diarize::SAME_SPEAKER);
@@ -188,8 +188,8 @@ mod tests {
         r.samples::<i16>().map(|s| s.unwrap() as f32 / 32768.0).collect()
     }
 
-    /// Syntetyczne spotkanie: „system” = kobieta, mężczyzna, kobieta, mężczyzna (FLEURS),
-    /// „mikrofon” = moja wypowiedź w środku. Wymaga modeli: `cargo test -- --ignored synthetic_meeting`.
+    /// Synthetic meeting: "system" = woman, man, woman, man (FLEURS), "microphone" = my
+    /// utterance in the middle. Requires models: `cargo test -- --ignored synthetic_meeting`.
     #[test]
     #[ignore]
     fn synthetic_meeting_two_remote_speakers_and_me() {
@@ -201,7 +201,7 @@ mod tests {
             }
         }
         let (w, m, me) = (load("fleurs_kobieta.wav"), load("fleurs_mezczyzna.wav"), load("ja_zosia.wav"));
-        let room = |n: usize| vec![0.00001f32; n]; // „cisza w pokoju”, nie cyfrowe zero
+        let room = |n: usize| vec![0.00001f32; n]; // "room silence", not digital zero
         let gap = 32_000;
         let (mut sys, mut mic) = (Vec::new(), Vec::new());
         for (i, voice) in [&w, &m, &w, &m].into_iter().enumerate() {

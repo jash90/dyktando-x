@@ -1,4 +1,4 @@
-//! Dyktando X — wieloplatformowe dyktowanie po polsku (Tauri 2).
+//! Dyktando X — cross-platform Polish dictation (Tauri 2).
 mod ai;
 mod audio;
 mod commands;
@@ -71,7 +71,7 @@ fn apply_hotkeys(app: &AppHandle) -> Vec<String> {
     };
     let state = app.state::<AppState>();
     let mut slot = state.hotkeys.lock().unwrap();
-    *slot = None; // najpierw zwolnij stare (blokowanie klawiszy, wątki)
+    *slot = None; // release the old ones first (key blocking, threads)
     let handle = app.clone();
     let hk = hotkeys::Hotkeys::start(&config, move |a| on_hotkey(&handle, a));
     let warnings = hk.warnings.clone();
@@ -82,7 +82,7 @@ fn apply_hotkeys(app: &AppHandle) -> Vec<String> {
     warnings
 }
 
-// MARK: - Komendy dla interfejsu
+// MARK: - UI commands
 
 #[tauri::command]
 fn get_settings(state: tauri::State<AppState>) -> Settings {
@@ -240,8 +240,8 @@ fn open_accessibility_settings(app: AppHandle) -> Result<Vec<String>, String> {
     Ok(apply_hotkeys(&app))
 }
 
-/// Wyłącza skróty na czas nagrywania nowego skrótu w ustawieniach (inaczej F5 by nie dotarł
-/// do okna, bo blokujemy go globalnie). `reload_hotkeys` włącza je z powrotem.
+/// Disables shortcuts while a new shortcut is being recorded in settings (otherwise F5 wouldn't
+/// reach the window, since we block it globally). `reload_hotkeys` turns them back on.
 #[tauri::command]
 fn pause_hotkeys(state: tauri::State<AppState>) {
     *state.hotkeys.lock().unwrap() = None;
@@ -257,15 +257,15 @@ fn open_meetings(app: AppHandle) {
     show_window(&app, Window::Meetings);
 }
 
-/// Wątki w tle: licznik nagrywania w pasku (co sekundę), odzyskiwanie spotkań po awarii
-/// i retencja audio (przy starcie i raz na dobę).
+/// Background threads: recording timer in the menu bar (every second), meeting crash recovery
+/// and audio retention (at startup and once a day).
 fn start_background(app: &AppHandle) {
     let store = meetings::store::Store::default();
     let recovered = store.recover();
     if !recovered.is_empty() {
         log::warn!("Odzyskane spotkania po przerwanym nagrywaniu: {recovered:?}");
     }
-    // Wykrywanie spotkań (co 5 s, gdy włączone w ustawieniach).
+    // Meeting detection (every 5 s, when enabled in settings).
     let detector_app = app.clone();
     std::thread::spawn(move || {
         let mut logic = meetings::detector::DetectionLogic::default();
@@ -282,7 +282,7 @@ fn start_background(app: &AppHandle) {
             }
         }
     });
-    // Status nagrania 4×/s (poziomy w oknie na żywo); pasek odświeżany tylko, gdy zmieni się sekunda.
+    // Recording status 4×/s (levels in the live window); menu bar refreshed only when the second changes.
     let handle = app.clone();
     std::thread::spawn(move || {
         let mut last_retention = std::time::Instant::now() - std::time::Duration::from_secs(86_400);
@@ -330,7 +330,7 @@ fn set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
     if enabled { al.enable() } else { al.disable() }.map_err(|e| e.to_string())
 }
 
-/// Ponowna rejestracja skrótów — np. po nadaniu uprawnień.
+/// Re-registers shortcuts — e.g. after permissions are granted.
 #[tauri::command]
 fn reload_hotkeys(app: AppHandle) -> Vec<String> {
     apply_hotkeys(&app)
@@ -339,13 +339,13 @@ fn reload_hotkeys(app: AppHandle) -> Vec<String> {
 #[derive(Clone, Copy)]
 pub enum Window {
     Settings,
-    /// Ustawienia otwarte od razu na danym panelu (np. „system” z pozycji aktualizacji w trayu).
+    /// Settings opened directly on a given panel (e.g. "system" from the update item in the tray).
     SettingsPane(&'static str),
     Meetings,
 }
 
-/// Okna powstają dopiero przy pierwszym otwarciu (a potem są tylko chowane): ukryte okno
-/// utworzone na starcie nie ma sensu, a zjada pamięć procesu WebKit/WebView2.
+/// Windows are created only on first open (and afterwards only hidden): a hidden window
+/// created at startup is pointless and eats WebKit/WebView2 process memory.
 pub fn show_window(app: &AppHandle, which: Window) {
     let (label, url, title, size, min) = match which {
         Window::Settings => ("main", "index.html".to_string(), "Dyktando X — Ustawienia", (860.0, 620.0), (720.0, 480.0)),
@@ -354,7 +354,7 @@ pub fn show_window(app: &AppHandle, which: Window) {
     };
     let window = match app.get_webview_window(label) {
         Some(w) => {
-            // Okno już istnieje — panel przełącza zdarzenie (adres zna tylko nowe okno).
+            // Window already exists — an event switches the panel (only a new window knows the URL).
             if let Window::SettingsPane(pane) = which {
                 let _ = app.emit_to(label, "open-pane", pane);
             }
@@ -385,7 +385,7 @@ fn show_settings(app: &AppHandle) {
 
 fn autostart_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
     let builder = tauri_plugin_autostart::Builder::new();
-    // `macos_launcher` istnieje tylko w kompilacji na macOS.
+    // `macos_launcher` exists only in macOS builds.
     #[cfg(target_os = "macos")]
     let builder = builder.macos_launcher(tauri_plugin_autostart::MacosLauncher::LaunchAgent);
     builder.build()
@@ -396,8 +396,8 @@ pub fn run() {
     logging::init();
     let settings = Settings::load();
     tauri::Builder::default()
-        // Ponowne uruchomienie (dwuklik w Finderze / menu Start) otwiera ustawienia działającej kopii.
-        // `--meetings` otwiera okno spotkań (np. ze skrótu systemowego).
+        // Relaunching (double-click in Finder / Start menu) opens settings of the running instance.
+        // `--meetings` opens the meetings window (e.g. from a system shortcut).
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             if args.iter().any(|a| a == "--meetings") {
                 show_window(app, Window::Meetings);
@@ -406,8 +406,8 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_opener::init())
-        // Autostart: macOS przez LaunchAgent (bez zgody „Elementy logowania” dla każdej wersji),
-        // Windows przez rejestr Run, Linux przez ~/.config/autostart.
+        // Autostart: macOS via LaunchAgent (no "Login Items" approval for every version),
+        // Windows via the Run registry key, Linux via ~/.config/autostart.
         .plugin(autostart_plugin())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -486,14 +486,14 @@ pub fn run() {
             if std::env::args().any(|a| a == "--meetings") {
                 show_window(&handle, Window::Meetings);
             }
-            // Pierwsze uruchomienie (brak modelu) — od razu pokaż ustawienia.
+            // First launch (no model) — show settings right away.
             if !s.engine.asset().is_installed() {
                 show_settings(&handle);
             }
             Ok(())
         })
         .on_window_event(|window, event| {
-            // Zamknięcie okna ustawień tylko je chowa — aplikacja żyje w zasobniku.
+            // Closing the settings window only hides it — the app lives in the tray.
             if let WindowEvent::CloseRequested { api, .. } = event {
                 if window.label() == "main" || window.label() == "meetings" {
                     api.prevent_close();
@@ -504,8 +504,8 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("błąd uruchamiania Dyktando X")
         .run(|app, event| {
-            // macOS: dwuklik w Finderze / Spotlight na działającej aplikacji nie startuje drugiej
-            // kopii, tylko wysyła „reopen” — wtedy pokazujemy ustawienia.
+            // macOS: double-clicking a running app in Finder / Spotlight doesn't start a second
+            // instance, it only sends "reopen" — then we show settings.
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Reopen { .. } = event {
                 show_settings(app);

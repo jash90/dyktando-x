@@ -1,14 +1,14 @@
-//! Nagrywanie spotkania: mikrofon (cpal) + dźwięk systemowy, każda ścieżka przez resampler do
-//! 16 kHz i zapis na dysk (nic nie rośnie w RAM). Ścieżki trzymamy wyrównane względem zegara
-//! nagrania: gdy któraś zaczyna później albo ma przerwę (np. tap utworzony na nowo po zgodzie
-//! użytkownika), lukę wypełniamy ciszą — znaczniki czasu obu ścieżek się zgadzają.
-//! Opcjonalnie próbki 16 kHz obu ścieżek idą też do transkrypcji na żywo (`live`).
+//! Meeting recording: microphone (cpal) + system audio, each track through a resampler to
+//! 16 kHz and written to disk (nothing grows in RAM). Tracks are kept aligned to the recording
+//! clock: when one starts later or has a gap (e.g. a tap recreated after the user grants
+//! permission), the gap is filled with silence — the timestamps of both tracks match.
+//! Optionally the 16 kHz samples of both tracks also go to live transcription (`live`).
 //!
-//! Wątki audio tylko kopiują próbki do kolejki (z chwilą odbioru) — przeliczanie, zapis na dysk
-//! i transkrypcję na żywo robi osobny wątek, więc chwilowa zadyszka dysku nie gubi dźwięku.
-//! Nadzór pilnuje obu źródeł: gdy dostawy ustaną, strumień zgłosi błąd albo zmieni się
-//! urządzenie (np. słuchawki Bluetooth), przechwytywanie jest tworzone od nowa. Przerwy,
-//! których nie dało się uniknąć, trafiają do logu i do `Meeting::audio_gaps`.
+//! Audio threads only copy samples to a queue (with the time of receipt) — resampling, writing to
+//! disk and live transcription are done by a separate thread, so a momentary disk hiccup loses no audio.
+//! A supervisor watches both sources: when deliveries stop, the stream reports an error or the
+//! device changes (e.g. Bluetooth headphones), the capture is recreated. Gaps that couldn't be
+//! avoided go to the log and to `Meeting::audio_gaps`.
 use anyhow::{anyhow, Result};
 use chrono::Local;
 use serde::Serialize;
@@ -26,22 +26,22 @@ use super::writer::{SegmentedWriter, RATE};
 use crate::audio::capture::{self, InputCapture};
 use crate::audio::resample::StreamResampler;
 
-/// Luka większa niż to (w próbkach 16 kHz) jest wypełniana ciszą.
+/// A gap larger than this (in 16 kHz samples) is filled with silence.
 const GAP_TOLERANCE: u64 = RATE as u64 / 2;
-/// Tak długa przerwa w dostawach (ms) znaczy, że źródło się urwało.
+/// A pause in deliveries this long (ms) means the source has dropped out.
 const STALL_MS: u64 = 3_000;
-/// Najkrótszy odstęp (ms) między kolejnymi próbami odtworzenia tego samego źródła.
+/// Minimum interval (ms) between successive attempts to recreate the same source.
 const RETRY_MS: u64 = 3_000;
 const MAX_RETRIES: u32 = 30;
-/// Mikrofon dający same zera tak długo (ms) jest najpewniej wyciszony w systemie.
+/// A microphone producing only zeros for this long (ms) is most likely muted in the system.
 const SILENT_MIC_MS: u64 = 10_000;
-/// Przerwy krótsze niż to (s) nie trafiają do `Meeting::audio_gaps`.
+/// Gaps shorter than this (s) don't go to `Meeting::audio_gaps`.
 const REPORTED_GAP_S: f64 = 2.0;
 
-/// Pilnuje, czy źródło naprawdę daje tyle próbek na sekundę, ile zgłosiło. Gdy zgłoszona
-/// częstotliwość jest zła (np. macOS: tap 48 kHz, wyjście 16 kHz), resampler gubi część dźwięku,
-/// a wypełnianie luk wstawia co chwilę ciszę — mowa robi się nierozpoznawalna. Czysta logika:
-/// czas podaje wołający.
+/// Checks whether the source really delivers as many samples per second as it reported. When the
+/// reported rate is wrong (e.g. macOS: 48 kHz tap, 16 kHz output), the resampler loses part of the
+/// audio and gap filling keeps inserting silence — speech becomes unrecognisable. Pure logic:
+/// the caller supplies the time.
 pub struct RateWatch {
     declared: u32,
     since: Option<f64>,
@@ -50,10 +50,10 @@ pub struct RateWatch {
 }
 
 impl RateWatch {
-    /// Okno pomiaru (s).
+    /// Measurement window (s).
     const WINDOW: f64 = 3.0;
-    /// Przerwa w dostawach dłuższa niż to zaczyna pomiar od nowa (WASAPI loopback w ciszy nie
-    /// wysyła nic — to nie jest zła częstotliwość).
+    /// A pause in deliveries longer than this restarts the measurement (WASAPI loopback sends
+    /// nothing in silence — that's not a wrong rate).
     const STALL: f64 = 0.25;
     const TOLERANCE: f64 = 0.08;
     const STANDARD: [u32; 9] = [8_000, 11_025, 16_000, 22_050, 24_000, 32_000, 44_100, 48_000, 96_000];
@@ -62,13 +62,13 @@ impl RateWatch {
         Self { declared, since: None, last: 0.0, frames: 0 }
     }
 
-    /// `frames` próbek (mono, przed resamplingiem) przyszło w chwili `now` (s). Zwraca nową
-    /// częstotliwość, jeśli zmierzona wyraźnie różni się od zgłoszonej.
+    /// `frames` samples (mono, before resampling) arrived at time `now` (s). Returns the new rate
+    /// if the measured one clearly differs from the reported one.
     pub fn push(&mut self, frames: usize, now: f64) -> Option<u32> {
         let since = match self.since {
             Some(s) if (0.0..=Self::STALL).contains(&(now - self.last)) => s,
             _ => {
-                // Pierwsza porcja (albo po przerwie) wyznacza początek okna — jej próbek nie liczymy.
+                // The first chunk (or the one after a pause) marks the start of the window — its samples aren't counted.
                 self.since = Some(now);
                 self.last = now;
                 self.frames = 0;
@@ -98,18 +98,18 @@ impl RateWatch {
 }
 
 struct Track {
-    /// „mikrofon” / „rozmówcy” — do logów.
+    /// "mikrofon" / "rozmówcy" ("microphone" / "participants") — for logs.
     name: &'static str,
     writer: Option<SegmentedWriter>,
     resampler: Option<StreamResampler>,
     error: Option<String>,
     live: Option<(Arc<Live>, transcript::Track)>,
     watch: Option<RateWatch>,
-    /// Szczytowy RMS od ostatniego odczytu (bity f32) — wskaźnik „sygnał jest” w oknie na żywo.
+    /// Peak RMS since the last read (f32 bits) — the "signal present" indicator in the live window.
     peak: Arc<AtomicU32>,
-    /// Czy luki to zgubiony dźwięk (WASAPI loopback w ciszy nie wysyła nic — tam luka to cisza).
+    /// Whether gaps are lost audio (WASAPI loopback sends nothing in silence — there a gap is silence).
     report_gaps: bool,
-    /// Przerwy w środku nagrania: (początek s, długość s).
+    /// Gaps in the middle of the recording: (start s, length s).
     gaps: Vec<(f64, f64)>,
 }
 
@@ -123,7 +123,7 @@ impl Track {
         self.watch = Some(RateWatch::new(rate));
     }
 
-    /// `now`: chwila odbioru porcji w wątku audio (s od startu nagrania), nie chwila zapisu.
+    /// `now`: time the chunk was received in the audio thread (s from the start of recording), not the write time.
     fn push(&mut self, now: f64, samples: &[f32]) {
         if let Some(rate) = self.watch.as_mut().and_then(|w| w.push(samples.len(), now)) {
             log::warn!("Źródło daje {rate} Hz zamiast zgłoszonych — przestawiam przeliczanie");
@@ -149,7 +149,7 @@ impl Track {
         }
         let result = if expected > after + GAP_TOLERANCE { w.append_silence(expected - after) } else { Ok(()) }.and_then(|_| w.append(&out));
         if let Err(e) = result {
-            // Pełny dysk itp. — zapamiętaj pierwszy błąd, pokażemy go przy zatrzymaniu.
+            // Disk full etc. — remember the first error, we'll show it on stop.
             if self.error.is_none() {
                 log::error!("zapis ścieżki: {e}");
                 self.error = Some(e.to_string());
@@ -157,8 +157,8 @@ impl Track {
         }
     }
 
-    /// Dopełnia ścieżkę ciszą do długości nagrania. Gdy brakuje dużo, źródło urwało się
-    /// i już nie wróciło — to też przerwa (najgorsza: aż do końca).
+    /// Pads the track with silence to the recording length. When a lot is missing, the source
+    /// dropped out and never came back — that's a gap too (the worst kind: until the very end).
     fn pad_to(&mut self, expected: u64) {
         let Some(w) = self.writer.as_mut() else { return };
         let have = w.samples_written();
@@ -191,22 +191,22 @@ pub struct RecordingStatus {
     pub seconds: f64,
     pub has_system_audio: bool,
     pub warning: Option<String>,
-    /// Szczytowy poziom (RMS) mikrofonu i dźwięku systemowego od poprzedniego odczytu.
+    /// Peak level (RMS) of the microphone and system audio since the previous read.
     pub mic_level: f32,
     pub system_level: f32,
 }
 
-/// Wiadomość z wątku audio do wątku zapisu: porcja ścieżki z chwilą odbioru (s od startu).
+/// Message from the audio thread to the writer thread: a track chunk with its receipt time (s from start).
 enum Msg {
     Audio(transcript::Track, f64, Vec<f32>),
     Stop,
 }
 
-/// Co wątki audio wiedzą o dostawach źródła — czyta nadzór (atomowo, bez blokad).
+/// What the audio threads know about the source's deliveries — read by the supervisor (atomically, lock-free).
 struct Flow {
-    /// ms od startu nagrania przy ostatnim buforze; 0 = jeszcze nic.
+    /// ms from the start of recording at the last buffer; 0 = nothing yet.
     last_ms: AtomicU64,
-    /// Od kiedy (ms) przychodzą same zera; `u64::MAX` = ostatni bufor nie był cichy.
+    /// Since when (ms) only zeros have been arriving; `u64::MAX` = the last buffer wasn't silent.
     zero_since_ms: AtomicU64,
 }
 
@@ -216,7 +216,7 @@ impl Flow {
     }
 }
 
-/// Odbiorca próbek dla wątku audio: tylko kopia do kolejki i znacznik dostawy.
+/// Sample receiver for the audio thread: just a copy to the queue and a delivery timestamp.
 fn audio_sink(kind: transcript::Track, started: Instant, tx: Sender<Msg>, flow: Arc<Flow>) -> impl FnMut(&[f32]) + Send + 'static {
     move |samples: &[f32]| {
         if samples.is_empty() {
@@ -234,10 +234,10 @@ fn audio_sink(kind: transcript::Track, started: Instant, tx: Sender<Msg>, flow: 
     }
 }
 
-/// Stan, który nadzór zgłasza w oknie nagrywania.
+/// State the supervisor reports in the recording window.
 #[derive(Default)]
 struct Warnings {
-    /// Dźwięku aplikacji nie da się nagrywać (system, uprawnienie) — stały komunikat.
+    /// App audio can't be recorded (system, permission) — a persistent message.
     system_unavailable: Option<String>,
     system_lost: bool,
     mic_lost: bool,
@@ -261,7 +261,7 @@ impl Warnings {
     }
 }
 
-/// Źródła dźwięku i to, czego potrzeba, żeby je odtworzyć po awarii.
+/// Audio sources and what's needed to recreate them after a failure.
 struct Sources {
     started: Instant,
     tx: Sender<Msg>,
@@ -310,7 +310,7 @@ impl Sources {
     }
 }
 
-/// Pilnuje jednego źródła: kiedy ostatnio je (od)tworzono i ile razy z rzędu się nie udało.
+/// Watches a single source: when it was last (re)created and how many times in a row it failed.
 struct Watch {
     since_ms: u64,
     last_try_ms: u64,
@@ -322,7 +322,7 @@ impl Watch {
         Self { since_ms: now_ms, last_try_ms: 0, retries: 0 }
     }
 
-    /// Ile ms bez dostaw (licząc od ostatniego bufora albo od (od)tworzenia źródła).
+    /// How many ms without deliveries (counting from the last buffer or from the source's (re)creation).
     fn idle_ms(&self, flow: &Flow, now_ms: u64) -> u64 {
         now_ms.saturating_sub(flow.last_ms.load(Ordering::Relaxed).max(self.since_ms))
     }
@@ -332,24 +332,24 @@ impl Watch {
     }
 }
 
-/// Powód odtworzenia źródła.
+/// Reason for recreating a source.
 struct Problem {
     why: &'static str,
-    /// Dźwięk płynął i się urwał (ostrzeżenie w oknie nagrywania). Źródło, które jeszcze nic nie
-    /// dało (macOS czeka na zgodę), nie jest „urwane”.
+    /// Audio was flowing and cut off (warning in the recording window). A source that hasn't
+    /// delivered anything yet (macOS waiting for permission) isn't "cut off".
     dropout: bool,
 }
 
-/// Dlaczego źródło trzeba utworzyć od nowa (`None` = działa).
+/// Why the source has to be recreated (`None` = it's working).
 fn system_problem(src: &Sources, watch: &Watch, now_ms: u64) -> Option<Problem> {
     let guard = src.system.lock().unwrap();
     let Some(c) = guard.as_ref() else { return Some(Problem { why: "przechwytywanie nie działa", dropout: true }) };
-    // Gdzie cisza = brak buforów (Windows), brak dostaw niczego nie mówi.
+    // Where silence = no buffers (Windows), a lack of deliveries tells us nothing.
     if !system::DELIVERS_IN_SILENCE {
         return None;
     }
     if c.buffers_received() == 0 {
-        // Tap utworzony przed zgodą użytkownika nie oddaje nic (macOS).
+        // A tap created before the user granted permission delivers nothing (macOS).
         let waited = now_ms.saturating_sub(watch.since_ms) > 4_000;
         return waited.then_some(Problem { why: "nie oddaje dźwięku", dropout: false });
     }
@@ -368,8 +368,8 @@ fn mic_problem(src: &Sources, watch: &Watch, now_ms: u64, check_default: bool) -
     if watch.idle_ms(&src.mic_flow, now_ms) > STALL_MS {
         return Some("dostawy ustały");
     }
-    // Gdy nagrywamy z domyślnego mikrofonu (nie wybrano innego albo wybranego nie ma),
-    // idziemy za zmianą domyślnego — np. po podłączeniu słuchawek.
+    // When recording from the default microphone (no other one chosen, or the chosen one is missing),
+    // we follow changes of the default — e.g. after headphones are plugged in.
     let follows_default = src.input_device.as_deref().is_none_or(|d| d != m.device_name);
     if check_default && follows_default && capture::default_input_name().is_some_and(|d| d != m.device_name) {
         return Some("zmienił się domyślny mikrofon");
@@ -377,7 +377,7 @@ fn mic_problem(src: &Sources, watch: &Watch, now_ms: u64, check_default: bool) -
     None
 }
 
-/// Nadzór źródeł (co 0,5 s): odtwarza te, które się urwały, i ustawia ostrzeżenia.
+/// Source supervisor (every 0.5 s): recreates the ones that dropped out and sets warnings.
 fn supervise(src: Arc<Sources>, system_wanted: bool, stop: Arc<AtomicBool>) {
     let mut sys = Watch::new(0);
     let mut mic = Watch::new(0);
@@ -448,7 +448,7 @@ fn supervise(src: Arc<Sources>, system_wanted: bool, stop: Arc<AtomicBool>) {
     }
 }
 
-/// Wątek zapisu: przelicza i zapisuje porcje w kolejności odbioru, aż do `Msg::Stop`.
+/// Writer thread: resamples and writes chunks in order of receipt, until `Msg::Stop`.
 fn write_loop(rx: mpsc::Receiver<Msg>, started: Instant, mic_track: Arc<Mutex<Track>>, sys_track: Arc<Mutex<Track>>) {
     let mut lagging = false;
     for msg in rx {
@@ -457,7 +457,7 @@ fn write_loop(rx: mpsc::Receiver<Msg>, started: Instant, mic_track: Arc<Mutex<Tr
         if lag > 2.0 && !lagging {
             log::warn!("Zapis nagrania nie nadąża (opóźnienie {lag:.1} s) — dźwięk czeka w pamięci");
         }
-        // Ostrzegamy po przekroczeniu 2 s, ponownie dopiero po zejściu poniżej 0,5 s.
+        // We warn after exceeding 2 s, and again only after dropping below 0.5 s.
         lagging = if lagging { lag > 0.5 } else { lag > 2.0 };
         let track = if kind == transcript::Track::Mic { &mic_track } else { &sys_track };
         track.lock().unwrap().push(at, &samples);
@@ -473,7 +473,7 @@ struct Active {
     live: Option<Arc<Live>>,
 }
 
-/// Odbiorca zdarzeń transkrypcji na żywo: (id spotkania, zdarzenie).
+/// Receiver of live transcription events: (meeting id, event).
 pub type LiveListener = Box<dyn Fn(&str, live::Event) + Send + Sync + 'static>;
 
 #[derive(Default)]
@@ -514,7 +514,7 @@ impl Recorder {
         self.active.lock().unwrap().is_some()
     }
 
-    /// Wypowiedzi przepisane dotąd na żywo w trwającym nagraniu (dla okna otwartego w trakcie).
+    /// Utterances transcribed live so far in the ongoing recording (for a window opened mid-recording).
     pub fn live_utterances(&self) -> Vec<Utterance> {
         let guard = self.active.lock().unwrap();
         let mut all = guard.as_ref().and_then(|a| a.live.as_ref()).map(|l| l.utterances()).unwrap_or_default();
@@ -522,7 +522,7 @@ impl Recorder {
         all
     }
 
-    /// `live`: konfiguracja transkrypcji na żywo i odbiorca jej zdarzeń; `None` = wyłączona.
+    /// `live`: live transcription config and the receiver of its events; `None` = disabled.
     pub fn start(&self, store: &Store, input_device: Option<&str>, live: Option<(live::Config, LiveListener)>) -> Result<Meeting> {
         let mut guard = self.active.lock().unwrap();
         if guard.is_some() {
@@ -532,7 +532,7 @@ impl Recorder {
         let meeting = store.create(Local::now(), system_available.is_ok())?;
         let audio = store.audio_folder(&meeting.id);
         let started = Instant::now();
-        // Transkrypcja na żywo: brak modelu nie blokuje nagrania — tylko tekst się nie pojawi.
+        // Live transcription: a missing model doesn't block recording — the text just won't appear.
         let live = live.and_then(|(config, listener)| {
             let listener = Arc::new(listener);
             let (id, l) = (meeting.id.clone(), listener.clone());
@@ -606,9 +606,9 @@ impl Recorder {
         Ok(meeting)
     }
 
-    /// Kończy nagranie, wyrównuje długości ścieżek i zapisuje `meeting.json` (stan `recorded`).
-    /// Tekst z transkrypcji na żywo zostaje zapisany jako transkrypt tymczasowy (bez mówców);
-    /// pełna transkrypcja po nagraniu go nadpisze.
+    /// Ends the recording, aligns track lengths and writes `meeting.json` (state `recorded`).
+    /// Text from live transcription is saved as a temporary transcript (without speakers);
+    /// the full transcription after recording will overwrite it.
     pub fn stop(&self, store: &Store) -> Result<Meeting> {
         let mut a = self.active.lock().unwrap().take().ok_or_else(|| anyhow!("Nic nie jest nagrywane"))?;
         a.stop_monitor.store(true, Ordering::Relaxed);
@@ -620,7 +620,7 @@ impl Recorder {
         let had_system = src.system.lock().unwrap().is_some();
         src.stop_system();
         let seconds = src.started.elapsed().as_secs_f64();
-        // Źródła już nic nie wysyłają — wątek zapisu dopisuje to, co czeka w kolejce, i kończy.
+        // Sources no longer send anything — the writer thread appends what's waiting in the queue and exits.
         let _ = src.tx.send(Msg::Stop);
         if let Some(w) = a.writer.take() {
             let _ = w.join();
@@ -690,7 +690,7 @@ mod tests {
         t
     }
 
-    /// Porcje po 10 ms od `from` do `to` (s), jak z wątku audio.
+    /// Chunks of 10 ms from `from` to `to` (s), as from the audio thread.
     fn feed_track(t: &mut Track, from: f64, to: f64) {
         let mut at = from;
         while at < to {
@@ -704,11 +704,11 @@ mod tests {
         let dir = tmp();
         let mut t = track(&dir, true);
         feed_track(&mut t, 0.0, 2.0);
-        feed_track(&mut t, 6.0, 8.0); // 4 s bez dostaw
+        feed_track(&mut t, 6.0, 8.0); // 4 s without deliveries
         assert_eq!(t.gaps.len(), 1, "{:?}", t.gaps);
         let (start, len) = t.gaps[0];
         assert!((start - 2.0).abs() < 0.1 && (len - 4.0).abs() < 0.1, "{start} {len}");
-        // Ścieżka dalej trzyma się zegara nagrania.
+        // The track still follows the recording clock.
         let written = t.writer.as_ref().unwrap().samples_written() as f64 / RATE as f64;
         assert!((written - 8.0).abs() < 0.1, "{written}");
         std::fs::remove_dir_all(dir).ok();
@@ -723,7 +723,7 @@ mod tests {
         assert_eq!(t.gaps.len(), 1);
         let (start, len) = t.gaps[0];
         assert!((start - 2.0).abs() < 0.1 && (len - 8.0).abs() < 0.1, "{start} {len}");
-        // Zwykła końcówka (ostatnie bufory w drodze) to nie przerwa.
+        // A normal tail (last buffers in flight) is not a gap.
         let mut t = track(&dir, true);
         feed_track(&mut t, 0.0, 2.0);
         t.pad_to(2 * RATE as u64 + RATE as u64 / 10);
@@ -734,7 +734,7 @@ mod tests {
     #[test]
     fn silence_without_deliveries_is_not_a_gap_where_that_is_normal() {
         let dir = tmp();
-        let mut t = track(&dir, false); // WASAPI loopback w ciszy nie wysyła nic
+        let mut t = track(&dir, false); // WASAPI loopback sends nothing in silence
         feed_track(&mut t, 0.0, 1.0);
         feed_track(&mut t, 5.0, 6.0);
         assert!(t.gaps.is_empty());
@@ -745,7 +745,7 @@ mod tests {
     fn late_first_samples_are_not_a_gap() {
         let dir = tmp();
         let mut t = track(&dir, true);
-        feed_track(&mut t, 3.0, 4.0); // źródło ruszyło po 3 s (np. tap po zgodzie)
+        feed_track(&mut t, 3.0, 4.0); // the source started after 3 s (e.g. tap after permission)
         assert!(t.gaps.is_empty());
         std::fs::remove_dir_all(dir).ok();
     }
@@ -757,7 +757,7 @@ mod tests {
         let sys = Arc::new(Mutex::new(Track::new("rozmówcy", SegmentedWriter::new(&dir, SYSTEM).unwrap(), None, true)));
         sys.lock().unwrap().set_rate(RATE);
         let (tx, rx) = mpsc::channel();
-        // Wszystko trafia do kolejki, zanim wątek zapisu w ogóle ruszy (dysk „stał”).
+        // Everything lands in the queue before the writer thread even starts (the disk "stalled").
         for i in 1..=300 {
             tx.send(Msg::Audio(transcript::Track::Mic, i as f64 * 0.01, vec![0.1; 160])).unwrap();
         }
@@ -801,9 +801,9 @@ mod tests {
         assert!(!w.may_retry(20_000));
     }
 
-    /// Prawdziwy mikrofon i tap systemowy: w trakcie nagrania oba źródła „milkną” (podmieniamy je
-    /// na przechwytywanie, którego dźwięk nigdzie nie trafia), a nadzór ma je odtworzyć sam.
-    /// Puszcza cicho mowę z `say`. `cargo test --lib -- --ignored recovers_from --nocapture`.
+    /// Real microphone and system tap: mid-recording both sources "go silent" (we swap them for
+    /// a capture whose audio goes nowhere), and the supervisor has to recreate them on its own.
+    /// Plays speech quietly with `say`. `cargo test --lib -- --ignored recovers_from --nocapture`.
     #[test]
     #[ignore]
     fn real_recording_recovers_from_silent_sources() {
@@ -819,7 +819,7 @@ mod tests {
         {
             let guard = rec.active.lock().unwrap();
             let src = &guard.as_ref().unwrap().sources;
-            // Podmiana pod jedną blokadą — nadzór nie może zobaczyć chwili bez źródła.
+            // Swap under a single lock — the supervisor must not see a moment without a source.
             let fake = SystemCapture::start(Box::new(|_: &[f32]| {})).unwrap();
             let old = src.system.lock().unwrap().replace(fake);
             if let Some(old) = old {
@@ -849,7 +849,7 @@ mod tests {
         let dir = store.audio_folder(&meeting.id);
         let (mic, sys) = (super::super::writer::track_duration_samples(&dir, MIC), super::super::writer::track_duration_samples(&dir, SYSTEM));
         assert!((mic as i64 - sys as i64).abs() < RATE as i64 / 10, "ścieżki równej długości: {mic} {sys}");
-        // Po odtworzeniu tap znowu łapie mowę z `say`.
+        // After recreation the tap picks up the speech from `say` again.
         let mut tail = Vec::new();
         super::super::writer::read_track(&dir, SYSTEM, 1, |at, chunk| {
             if at as f64 / RATE as f64 >= 7.0 {
@@ -873,7 +873,7 @@ mod tests {
         assert!(text.contains("rozmówców") && text.contains("wyciszony"), "{text}");
     }
 
-    /// Porcje co 10 ms przez `secs` sekund, `rate` próbek/s; zwraca pierwszą zgłoszoną zmianę.
+    /// Chunks every 10 ms for `secs` seconds, `rate` samples/s; returns the first reported change.
     fn feed(w: &mut RateWatch, rate: f64, from: f64, secs: f64, jitter: bool) -> Option<u32> {
         let mut t = from;
         let mut i = 0;
@@ -909,7 +909,7 @@ mod tests {
 
     #[test]
     fn stalls_restart_the_window() {
-        // Dostawy 0,1 s co 0,5 s (WASAPI w ciszy) — średnio mało próbek, ale to nie zła częstotliwość.
+        // Deliveries of 0.1 s every 0.5 s (WASAPI in silence) — few samples on average, but not a wrong rate.
         let mut w = RateWatch::new(48_000);
         let mut t = 0.0;
         for _ in 0..40 {
@@ -921,8 +921,8 @@ mod tests {
     }
 }
 
-/// Transkrypt tymczasowy z wypowiedzi na żywo: te same pliki co po pełnej transkrypcji
-/// (`transcript.json`, `transcript.md`), bez rozpoznawania mówców.
+/// Temporary transcript from live utterances: the same files as after full transcription
+/// (`transcript.json`, `transcript.md`), without speaker recognition.
 fn save_live_transcript(store: &Store, meeting: &Meeting, engine: &str, seconds: f64, utterances: &[Utterance]) -> Result<()> {
     let (mic, system): (Vec<Utterance>, Vec<Utterance>) = utterances.iter().cloned().partition(|u| u.track == transcript::Track::Mic);
     let doc = TranscriptDocument {

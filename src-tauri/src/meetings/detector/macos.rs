@@ -1,4 +1,4 @@
-//! macOS 14.2+: procesy Core Audio z aktywnym wejściem (`kAudioProcessPropertyIsRunningInput`).
+//! macOS 14.2+: Core Audio processes with active input (`kAudioProcessPropertyIsRunningInput`).
 use objc2_core_audio::*;
 use objc2_core_foundation::CFString;
 use std::ffi::c_void;
@@ -42,7 +42,7 @@ pub fn processes_using_microphone() -> Vec<String> {
                 if AudioObjectGetPropertyData(obj, NonNull::from(&mut a), 0, std::ptr::null(), NonNull::from(&mut bsize), NonNull::from(&mut bundle).cast()) != 0 || bundle.is_null() {
                     return None;
                 }
-                // Właściwość zwraca CFString na +1.
+                // The property returns a CFString at +1.
                 let s = objc2_core_foundation::CFRetained::from_raw(NonNull::new_unchecked(bundle as *mut CFString));
                 Some(s.to_string())
             })

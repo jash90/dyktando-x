@@ -1,10 +1,10 @@
-//! Katalogi aplikacji: dane (modele, spotkania) i ustawienia.
+//! App directories: data (models, meetings) and settings.
 use std::path::PathBuf;
 
 pub const APP_DIR: &str = "DyktandoX";
 
-/// Np. macOS `~/Library/Application Support/DyktandoX`, Windows `%APPDATA%\DyktandoX`,
-/// Linux `~/.local/share/DyktandoX`. Zmienna `DYKTANDO_X_HOME` nadpisuje (testy).
+/// E.g. macOS `~/Library/Application Support/DyktandoX`, Windows `%APPDATA%\DyktandoX`,
+/// Linux `~/.local/share/DyktandoX`. The `DYKTANDO_X_HOME` variable overrides it (tests).
 pub fn support() -> PathBuf {
     if let Ok(p) = std::env::var("DYKTANDO_X_HOME") {
         return PathBuf::from(p);
@@ -26,7 +26,7 @@ pub fn dictations() -> PathBuf {
     support().join("Dictations")
 }
 
-/// Logi: macOS `~/Library/Logs/Dyktando X`, gdzie indziej `<dane>/logs`.
+/// Logs: macOS `~/Library/Logs/Dyktando X`, elsewhere `<data>/logs`.
 pub fn logs() -> PathBuf {
     if std::env::var_os("DYKTANDO_X_HOME").is_none() && cfg!(target_os = "macos") {
         if let Some(home) = dirs::home_dir() {

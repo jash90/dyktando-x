@@ -1,7 +1,7 @@
-//! Czy wklejać: pytamy system, co ma fokus. Tylko gdy na pewno NIE jest to pole tekstowe
-//! (przycisk, lista plików, brak fokusu) zostawiamy tekst w schowku. Niepewność → wklejamy,
-//! jak w wersji Swift. macOS: Accessibility, Windows: UI Automation, Linux (AT-SPI bywa
-//! zawodne) → zawsze „nie wiem”.
+//! Whether to paste: we ask the system what has focus. Only when it is definitely NOT a text field
+//! (button, file list, no focus) do we leave the text in the clipboard. Uncertainty → we paste,
+//! as in the Swift version. macOS: Accessibility, Windows: UI Automation, Linux (AT-SPI can be
+//! unreliable) → always "don't know".
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -11,20 +11,20 @@ pub enum Focus {
     Unknown,
 }
 
-/// Opis elementu z fokusem niezależny od systemu — testowalny bez API dostępności.
+/// OS-independent description of the focused element — testable without accessibility APIs.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Snapshot {
-    /// Rola AX (macOS, np. `AXTextField`) albo typ kontrolki UIA (Windows, np. `Edit`).
+    /// AX role (macOS, e.g. `AXTextField`) or UIA control type (Windows, e.g. `Edit`).
     pub role: Option<String>,
     pub value_settable: bool,
     pub has_text_range: bool,
-    /// macOS `AXEditableAncestor` (contenteditable w przeglądarce / Electronie).
+    /// macOS `AXEditableAncestor` (contenteditable in a browser / Electron).
     pub editable_ancestor: bool,
-    /// Bundle ID (macOS) albo nazwa pliku .exe (Windows).
+    /// Bundle ID (macOS) or .exe file name (Windows).
     pub app: Option<String>,
-    /// Aplikacja odpowiedziała, że nic nie ma fokusu.
+    /// The app replied that nothing has focus.
     pub nothing_focused: bool,
-    /// Nie udało się zapytać (brak uprawnień, limit czasu, aplikacja bez dostępności).
+    /// The query failed (no permissions, timeout, app without accessibility support).
     pub failed: bool,
 }
 
@@ -50,18 +50,18 @@ pub fn classify(s: &Snapshot) -> Focus {
     if s.role.as_deref().is_some_and(|r| TEXT_ROLES.contains(&r)) || s.editable_ancestor {
         return Focus::Editable;
     }
-    // Własne edytory (Word, edytory kodu): wartość do zmiany + zaznaczenie tekstu.
+    // Custom editors (Word, code editors): a settable value + text selection.
     if s.value_settable && s.has_text_range {
         return Focus::Editable;
     }
     if s.role.as_deref().is_some_and(|r| NON_TEXT_ROLES.contains(&r)) {
         return Focus::NotEditable;
     }
-    // Menedżer plików: Ctrl/⌘V z tekstem w schowku nic sensownego nie zrobi poza polami nazw.
+    // File manager: Ctrl/⌘V with text in the clipboard does nothing useful outside name fields.
     if s.app.as_deref().is_some_and(|a| a == "com.apple.finder" || a.eq_ignore_ascii_case("explorer.exe")) {
         return Focus::NotEditable;
     }
-    Focus::Unknown // AXGroup, AXWebArea, Document, Pane… — zbyt ogólne, nie blokujemy wklejania
+    Focus::Unknown // AXGroup, AXWebArea, Document, Pane… — too generic, we don't block pasting
 }
 
 pub fn snapshot() -> Snapshot {
@@ -124,7 +124,7 @@ mod tests {
 
 #[cfg(test)]
 mod live {
-    /// `cargo test -- --ignored focus_live --nocapture` (wymaga Dostępności dla terminala).
+    /// `cargo test -- --ignored focus_live --nocapture` (requires Accessibility for the terminal).
     #[test]
     #[ignore]
     fn focus_live() {

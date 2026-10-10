@@ -1,10 +1,10 @@
-//! Transkrypcja na żywo w trakcie nagrywania spotkania. Próbki 16 kHz z obu ścieżek trafiają
-//! kanałem do osobnego wątku, który dzieli je Silero VAD na wypowiedzi i każdą skończoną od razu
-//! przepisuje silnikiem. Nie czekamy jednak na pauzy: trwająca wypowiedź co ~1,5 s jest
-//! przepisywana jako tekst roboczy (`Event::Partial`), a najpóźniej po 8 s cięta w najcichszym
-//! miejscu. Wypowiedzi idą do interfejsu (zdarzenie `meeting-live`), a po
-//! zatrzymaniu nagrania całość służy jako transkrypt tymczasowy — do czasu pełnej transkrypcji
-//! z rozpoznawaniem mówców.
+//! Live transcription while a meeting is being recorded. 16 kHz samples from both tracks go
+//! through a channel to a separate thread, which splits them into utterances with Silero VAD and
+//! transcribes each finished one right away with the engine. We don't wait for pauses, though: an
+//! ongoing utterance is transcribed every ~1.5 s as draft text (`Event::Partial`), and cut at the
+//! quietest spot after 8 s at the latest. Utterances go to the UI (the `meeting-live` event), and
+//! after recording stops the whole thing serves as a temporary transcript — until the full
+//! transcription with speaker recognition.
 use anyhow::{anyhow, Result};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Sender};
@@ -18,9 +18,9 @@ use crate::engine::Engine;
 use crate::models::{self, AssetId, EngineId};
 use crate::settings::Language;
 
-/// Parametry dzielenia na żywo. Krótsza cisza niż w transkrypcji po nagraniu (0,45 s zamiast
-/// 0,5 s) i dużo krótsze maksimum: w szybkiej rozmowie pauz prawie nie ma, więc wypowiedź
-/// zamykamy najpóźniej po 8 s — w najcichszym miejscu ostatnich 2 s, nie w pół słowa.
+/// Live splitting parameters. Shorter silence than in post-recording transcription (0.45 s instead
+/// of 0.5 s) and a much shorter maximum: in a fast conversation there are almost no pauses, so an
+/// utterance is closed after 8 s at the latest — at the quietest spot of the last 2 s, not mid-word.
 #[derive(Debug, Clone, Copy)]
 pub struct Params {
     pub threshold: f32,
@@ -28,7 +28,7 @@ pub struct Params {
     pub min_silence: f64,
     pub pad: f64,
     pub max_segment: f64,
-    /// W ilu ostatnich sekundach okna szukamy miejsca cięcia.
+    /// Within how many final seconds of the window we look for a cut point.
     pub cut_search: f64,
 }
 
@@ -38,13 +38,13 @@ impl Default for Params {
     }
 }
 
-/// Czysta logika: kolejne prawdopodobieństwa ramek → granice wypowiedzi (w ramkach, koniec
-/// wyłączny), zwracane w chwili, gdy wypowiedź się kończy.
+/// Pure logic: successive frame probabilities → utterance boundaries (in frames, end
+/// exclusive), returned at the moment an utterance ends.
 pub struct Cutter {
     p: Params,
     frame: usize,
     start: Option<usize>,
-    /// Prawdopodobieństwa ramek trwającej wypowiedzi (od `start`) — do wyboru miejsca cięcia.
+    /// Frame probabilities of the ongoing utterance (from `start`) — for choosing the cut point.
     probs: Vec<f32>,
     silence: usize,
     min_silence: usize,
@@ -67,7 +67,7 @@ impl Cutter {
         }
     }
 
-    /// Początek trwającej wypowiedzi (ramka), jeśli jakaś trwa.
+    /// Start of the ongoing utterance (frame), if one is in progress.
     pub fn pending_start(&self) -> Option<usize> {
         self.start
     }
@@ -84,8 +84,8 @@ impl Cutter {
             self.silence = 0;
             self.probs.push(prob);
             if i + 1 - start >= self.max_frames {
-                // Najcichsza ramka w końcówce okna (przy remisie — najpóźniejsza); reszta po
-                // cięciu zaczyna następną wypowiedź, więc nic nie ginie.
+                // The quietest frame at the end of the window (on a tie — the latest one); the rest after
+                // the cut starts the next utterance, so nothing is lost.
                 let from = self.probs.len() - self.search_frames;
                 let mut cut = self.probs.len() - 1;
                 for k in from..self.probs.len() {
@@ -113,7 +113,7 @@ impl Cutter {
         self.accept(start, end)
     }
 
-    /// Koniec nagrania: domyka trwającą wypowiedź.
+    /// End of recording: closes the ongoing utterance.
     pub fn flush(&mut self) -> Option<(usize, usize)> {
         let start = self.start.take()?;
         let end = self.frame - self.silence;
@@ -129,11 +129,11 @@ pub struct Segment {
     pub samples: Vec<f32>,
 }
 
-/// Po tylu ramkach ciszy z rzędu (~1 s) zerujemy stan LSTM — jak w transkrypcji po nagraniu.
+/// After this many consecutive silent frames (~1 s) we reset the LSTM state — as in post-recording transcription.
 const RESET_AFTER_SILENT_FRAMES: usize = 31;
 
-/// Dzielenie jednej ścieżki na żywo: VAD ramka po ramce, bufor próbek tylko od początku
-/// trwającej wypowiedzi (z marginesem), więc pamięć nie rośnie z długością spotkania.
+/// Live splitting of a single track: VAD frame by frame, a sample buffer only from the start of
+/// the ongoing utterance (with a margin), so memory doesn't grow with the meeting length.
 pub struct Segmenter {
     vad: Silero,
     cutter: Cutter,
@@ -143,8 +143,8 @@ pub struct Segmenter {
     buf_frame0: usize,
     frames: usize,
     silent: usize,
-    /// Ramka ostatniego cięcia wymuszonego długością — tam sąsiednie wypowiedzi stykają się bez
-    /// marginesu (z marginesem słowa na styku byłyby przepisane dwa razy).
+    /// Frame of the last cut forced by length — there adjacent utterances touch without a
+    /// margin (with a margin the words at the seam would be transcribed twice).
     joined: Option<usize>,
 }
 
@@ -202,8 +202,8 @@ impl Segmenter {
         Ok(out)
     }
 
-    /// Trwająca (niedomknięta) wypowiedź, jeśli ma już co najmniej `min_seconds` — do tekstu
-    /// roboczego na żywo.
+    /// The ongoing (unclosed) utterance, if it's already at least `min_seconds` long — for live
+    /// draft text.
     pub fn pending(&self, min_seconds: f64) -> Option<Segment> {
         let start = self.cutter.pending_start()?;
         ((self.frames - start) as f64 * FRAME_SECONDS >= min_seconds).then(|| self.cut(start, self.frames))
@@ -221,15 +221,15 @@ impl Segmenter {
 pub struct Config {
     pub engine: EngineId,
     pub language: Language,
-    /// Kod języka tłumaczenia (np. „en”); `None` = bez tłumaczenia. Tłumaczy zawsze Canary
-    /// (jedyny model z tłumaczeniem w obie strony), niezależnie od `engine`.
+    /// Translation language code (e.g. "en"); `None` = no translation. Canary always translates
+    /// (the only model with translation both ways), regardless of `engine`.
     pub translate_to: Option<String>,
-    /// Słownik nazw i terminów (podpowiedź dla Whispera).
+    /// Vocabulary of names and terms (a hint for Whisper).
     pub vocabulary: String,
 }
 
 impl Config {
-    /// Model, który naprawdę będzie użyty (z tłumaczeniem — Canary).
+    /// The model that will actually be used (with translation — Canary).
     pub fn effective_engine(&self) -> EngineId {
         if self.translate_to.is_some() { EngineId::CanaryV2 } else { self.engine }
     }
@@ -237,10 +237,10 @@ impl Config {
 
 #[derive(Debug, Clone)]
 pub enum Event {
-    /// Wypowiedź domknięta (pauza albo cięcie po `max_segment`) — trafia do transkryptu.
+    /// A closed utterance (pause or cut after `max_segment`) — goes into the transcript.
     Utterance(Utterance),
-    /// Tekst roboczy trwającej wypowiedzi danej ścieżki; zastępuje poprzedni roboczy tej ścieżki.
-    /// Pusty tekst = usuń roboczy. Nie trafia do transkryptu.
+    /// Draft text of the ongoing utterance on a given track; replaces that track's previous draft.
+    /// Empty text = remove the draft. Doesn't go into the transcript.
     Partial(Utterance),
     Error(String),
 }
@@ -252,14 +252,14 @@ enum Msg {
     Stop,
 }
 
-/// Tekst roboczy pojawia się, gdy trwająca wypowiedź ma już tyle sekund…
+/// Draft text appears when the ongoing utterance is already this many seconds long…
 const PARTIAL_MIN_SECONDS: f64 = 1.0;
-/// …i odświeża się nie częściej niż co tyle (albo co 2× czas ostatniego przebiegu silnika).
+/// …and refreshes no more often than this (or every 2× the last engine run time).
 const PARTIAL_EVERY: Duration = Duration::from_millis(1500);
-/// Zaległość (próbki w kanale), powyżej której pomijamy tekst roboczy — liczą się tylko
-/// domknięte wypowiedzi, żeby okno nie odjeżdżało od rzeczywistości.
+/// Backlog (samples in the channel) above which we skip draft text — only closed utterances
+/// count, so the window doesn't drift away from reality.
 const MAX_BACKLOG_FOR_PARTIAL: usize = 2 * 16_000;
-/// Tłumaczenie tekstu roboczego tylko przy prawie pustej kolejce (to drugi przebieg dekodera).
+/// Translating draft text only when the queue is almost empty (it's a second decoder pass).
 const MAX_BACKLOG_FOR_PARTIAL_TRANSLATION: usize = 16_000 / 2;
 
 #[derive(Default)]
@@ -269,7 +269,7 @@ struct Draft {
     shown: bool,
 }
 
-/// Jeden przebieg silnika: tekst i (opcjonalnie) tłumaczenie; zapisuje czas przebiegu.
+/// A single engine run: text and (optionally) translation; records the run time.
 fn run(engine: &mut Engine, samples: &[f32], language: Language, translate_to: Option<&str>, last_run: &mut Duration) -> (Option<String>, Option<String>) {
     let t = Instant::now();
     let text = match engine.transcribe(samples, language) {
@@ -280,7 +280,7 @@ fn run(engine: &mut Engine, samples: &[f32], language: Language, translate_to: O
             return (None, None);
         }
     };
-    // Tłumaczenie to drugi przebieg dekodera po tym samym audio; błąd nie zabiera oryginału.
+    // Translation is a second decoder pass over the same audio; an error doesn't take away the original.
     let translation = translate_to.and_then(|to| match engine.translate(samples, language, to) {
         Ok(tr) if !tr.is_empty() => Some(tr),
         Ok(_) => None,
@@ -297,14 +297,14 @@ pub struct Live {
     tx: Mutex<Option<Sender<Msg>>>,
     handle: Mutex<Option<JoinHandle<()>>>,
     utterances: Arc<Mutex<Vec<Utterance>>>,
-    /// Próbki wysłane do wątku, a jeszcze nieprzetworzone.
+    /// Samples sent to the thread but not yet processed.
     queued: Arc<AtomicUsize>,
     pub engine_title: &'static str,
 }
 
 impl Live {
-    /// Sprawdza modele i startuje wątek (wczytanie modeli trwa parę sekund — w tle, nagranie
-    /// nie czeka; próbki z tego czasu czekają w kanale).
+    /// Checks the models and starts the thread (loading models takes a few seconds — in the background,
+    /// recording doesn't wait; samples from that period wait in the channel).
     pub fn start(config: Config, listener: Listener) -> Result<Self> {
         let vad = models::asset(AssetId::SileroVad);
         let engine_id = config.effective_engine();
@@ -339,12 +339,12 @@ impl Live {
                 Err(e) => {
                     log::error!("transkrypcja na żywo: {e}");
                     listener(Event::Error(e.to_string()));
-                    for _ in rx {} // nagranie trwa dalej, tylko bez tekstu na żywo
+                    for _ in rx {} // recording continues, just without live text
                     return;
                 }
             };
             let language = config.language;
-            // Ostatni czas przebiegu silnika — tempo tekstu roboczego dopasowuje się do sprzętu.
+            // Last engine run time — the draft text pace adapts to the hardware.
             let mut last_run = Duration::ZERO;
             let translate_to = translate_to.as_deref();
             let utterance = |seg: &Segment, track: Track, text: String, translation: Option<String>| {
@@ -375,7 +375,7 @@ impl Live {
                             Ok(segments) => segments.into_iter().for_each(|s| finalize(s, track, &mut engine, &mut drafts, &mut last_run)),
                             Err(e) => log::warn!("VAD na żywo: {e}"),
                         }
-                        // Tekst roboczy trwającej wypowiedzi — nie czekamy na pauzę.
+                        // Draft text of the ongoing utterance — we don't wait for a pause.
                         let waiting = backlog.load(Ordering::Relaxed);
                         if waiting > MAX_BACKLOG_FOR_PARTIAL {
                             continue;
@@ -416,7 +416,7 @@ impl Live {
         })
     }
 
-    /// Próbki 16 kHz mono danej ścieżki (wołane z wątków audio — tylko wysyła do kanału).
+    /// 16 kHz mono samples of a given track (called from audio threads — only sends to the channel).
     pub fn feed(&self, track: Track, samples: &[f32]) {
         if samples.is_empty() {
             return;
@@ -433,7 +433,7 @@ impl Live {
         self.utterances.lock().unwrap().clone()
     }
 
-    /// Domyka trwające wypowiedzi, czeka na ich przepisanie i oddaje wszystko po kolei.
+    /// Closes ongoing utterances, waits for them to be transcribed and returns everything in order.
     pub fn finish(&self) -> Vec<Utterance> {
         if let Some(tx) = self.tx.lock().unwrap().take() {
             let _ = tx.send(Msg::Stop);
@@ -500,7 +500,7 @@ mod tests {
     #[test]
     fn forced_cut_lands_in_the_quietest_frame_of_the_last_two_seconds() {
         let mut c = Cutter::new(Params::default());
-        // 6,5 s mowy, krótki „dołek” (wciąż powyżej progu), dalej mowa bez pauzy.
+        // 6.5 s of speech, a short "dip" (still above the threshold), then speech with no pause.
         let out = run(&mut c, &[(0.95, 6.5), (0.55, 0.1), (0.95, 10.0), (0.0, 1.0)]);
         assert!(out.len() >= 2, "{out:?}");
         let cut = out[0].1 as f64 * FRAME_SECONDS;
@@ -512,7 +512,7 @@ mod tests {
     #[test]
     fn dips_below_threshold_inside_window_are_preferred() {
         let mut c = Cutter::new(Params::default());
-        // Krótka przerwa (0,2 s < min_silence) nie zamyka wypowiedzi, ale jest najlepszym cięciem.
+        // A short pause (0.2 s < min_silence) doesn't close the utterance, but it's the best cut point.
         let out = run(&mut c, &[(0.9, 7.0), (0.1, 0.2), (0.9, 5.0), (0.0, 1.0)]);
         let cut = out[0].1 as f64 * FRAME_SECONDS;
         assert!((7.0..7.25).contains(&cut), "cięcie w {cut:.2} s: {out:?}");
@@ -534,8 +534,8 @@ mod tests {
         r.samples::<i16>().map(|s| s.unwrap() as f32 / 32768.0).collect()
     }
 
-    /// Dwa zdania z przerwą podane „strumieniowo” (porcje po 20 ms) → dwie wypowiedzi na żywo,
-    /// druga domknięta dopiero przez `finish`. Wymaga modeli: `cargo test -- --ignored live_`.
+    /// Two sentences with a pause fed "as a stream" (20 ms chunks) → two live utterances,
+    /// the second closed only by `finish`. Requires models: `cargo test -- --ignored live_`.
     #[test]
     #[ignore]
     fn live_streams_two_utterances_from_mic() {
@@ -563,8 +563,8 @@ mod tests {
         assert_eq!(got.lock().unwrap().iter().filter(|e| matches!(e, Event::Utterance(_))).count(), all.len());
     }
 
-    /// Mowa sklejona bez żadnej pauzy (szybka rozmowa) podawana w tempie rzeczywistym: tekst
-    /// roboczy musi się pojawić przed końcem, a domknięte wypowiedzi nie mogą przekraczać 8 s.
+    /// Speech glued together with no pause at all (fast conversation) fed in real time: draft text
+    /// must appear before the end, and closed utterances must not exceed 8 s.
     /// `cargo test -- --ignored live_`.
     #[test]
     #[ignore]
@@ -582,7 +582,7 @@ mod tests {
         let t = Instant::now();
         for chunk in audio.chunks(320) {
             live.feed(Track::System, chunk);
-            std::thread::sleep(Duration::from_millis(20)); // tempo rzeczywiste
+            std::thread::sleep(Duration::from_millis(20)); // real-time pace
         }
         let fed = Instant::now();
         let all = live.finish();
@@ -595,7 +595,7 @@ mod tests {
         assert!(text.contains("wizy") && text.contains("czwartek"), "{text}");
     }
 
-    /// Na żywo z tłumaczeniem pl→en (Canary): `cargo test -- --ignored live_translates`.
+    /// Live with pl→en translation (Canary): `cargo test -- --ignored live_translates`.
     #[test]
     #[ignore]
     fn live_translates_to_english_with_canary() {

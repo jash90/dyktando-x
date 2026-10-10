@@ -10,7 +10,7 @@
   <body>
     <div id="root"></div>
     <script>
-      // Błędy JS trafiają do logu aplikacji (stderr) — w wersji wydanej nie ma narzędzi deweloperskich.
+      // JS errors go to the app log (stderr) — release builds have no developer tools.
       (function () {
         function report(message) {
           try { window.__TAURI_INTERNALS__.invoke("js_error", { message: String(message), location: location.href }); } catch (e) {}

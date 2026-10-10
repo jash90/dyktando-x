@@ -1,6 +1,6 @@
-//! Whisper (whisper.cpp) wprost przez whisper-rs. transcribe-rs nie daje dostępu do stanu
-//! modelu, a ten jest potrzebny, żeby rozpoznać język wypowiedzi spośród wybranych.
-//! Parametry dekodowania są te same co w transcribe-rs (beam search 3, bez kontekstu).
+//! Whisper (whisper.cpp) directly via whisper-rs. transcribe-rs doesn't expose the model
+//! state, which is needed to detect the utterance's language among the selected ones.
+//! Decoding parameters are the same as in transcribe-rs (beam search 3, no context).
 use anyhow::{anyhow, Context, Result};
 use std::path::Path;
 use transcribe_rs::whisper_cpp::gpu::auto_select_gpu_device;
@@ -8,30 +8,30 @@ use transcribe_rs::{get_whisper_accelerator, get_whisper_gpu_device, GPU_DEVICE_
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters, WhisperState};
 
 pub struct Whisper {
-    // Kolejność ma znaczenie: stan zwalniamy przed kontekstem.
+    // Order matters: the state is dropped before the context.
     state: WhisperState,
     _context: WhisperContext,
-    /// Podpowiedź na start (słownik nazw i terminów) — Whisper chętniej pisze je poprawnie.
+    /// Initial prompt (dictionary of names and terms) — Whisper then spells them right more often.
     prompt: Option<String>,
 }
 
-/// Dłuższy słownik i tak by się nie zmieścił (Whisper bierze ok. 220 tokenów podpowiedzi).
+/// A longer dictionary wouldn't fit anyway (Whisper takes about 220 prompt tokens).
 const MAX_PROMPT_CHARS: usize = 600;
 
-/// Słowa do porównań: małe litery, bez interpunkcji.
+/// Words for comparison: lowercase, no punctuation.
 fn plain(text: &str) -> String {
     text.to_lowercase().split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect::<Vec<_>>().join(" ")
 }
 
-/// Na dźwięku bez słów Whisper potrafi „przeczytać” samą podpowiedź (albo jej kawałek). Jedno
-/// słowo zostawiamy — to częściej prawdziwe zawołanie po imieniu („Borys?”) niż echo; całe
-/// słowa porównujemy, więc „ci” nie pasuje do „CI/CD”, a „se” do „Hisense”.
+/// On audio without speech Whisper can "read out" the prompt itself (or a piece of it). A single
+/// word is kept — it's more often a real call by name ("Borys?") than an echo; whole
+/// words are compared, so "ci" doesn't match "CI/CD", nor "se" match "Hisense".
 fn is_prompt_echo(text: &str, prompt: &str) -> bool {
     let t = plain(text);
     t.contains(' ') && format!(" {} ", plain(prompt)).contains(&format!(" {t} "))
 }
 
-/// Wątki dla rozpoznania języka (whisper.cpp przy dekodowaniu sam bierze min(4, rdzenie)).
+/// Threads for language detection (whisper.cpp takes min(4, cores) itself when decoding).
 fn threads() -> usize {
     std::thread::available_parallelism().map_or(4, |n| n.get().min(4))
 }
@@ -52,13 +52,13 @@ impl Whisper {
         Ok(Self { state, _context: context, prompt: None })
     }
 
-    /// Słownik nazw i terminów (np. „NPaw, Hisense, Tizen, CI/CD”); pusty = bez podpowiedzi.
+    /// Dictionary of names and terms (e.g. "NPaw, Hisense, Tizen, CI/CD"); empty = no prompt.
     pub fn set_vocabulary(&mut self, vocabulary: &str) {
         let v = vocabulary.split_whitespace().collect::<Vec<_>>().join(" ");
         self.prompt = (!v.is_empty()).then(|| v.chars().take(MAX_PROMPT_CHARS).collect());
     }
 
-    /// Najbardziej prawdopodobny z `candidates` (kody whisper.cpp) język wypowiedzi.
+    /// The most likely language of the utterance among `candidates` (whisper.cpp codes).
     pub fn detect_language<'a>(&mut self, samples: &[f32], candidates: &[&'a str]) -> Result<&'a str> {
         self.state.pcm_to_mel(samples, threads()).map_err(|e| anyhow!("{e}"))?;
         let (_, probs) = self.state.lang_detect(0, threads()).map_err(|e| anyhow!("{e}"))?;
@@ -70,7 +70,7 @@ impl Whisper {
             .ok_or_else(|| anyhow!("Whisper nie zna żadnego z wybranych języków"))
     }
 
-    /// `language: None` = whisper.cpp sam rozpoznaje język (spośród wszystkich).
+    /// `language: None` = whisper.cpp detects the language itself (among all of them).
     pub fn transcribe(&mut self, samples: &[f32], language: Option<&str>, translate: bool) -> Result<String> {
         let mut params = FullParams::new(SamplingStrategy::BeamSearch { beam_size: 3, patience: -1.0 });
         params.set_language(language);
@@ -110,10 +110,10 @@ mod tests {
         assert!(is_prompt_echo(" Hisense, Tizen", prompt));
         assert!(!is_prompt_echo("Wczoraj na Hisense coś tam patrzyłem", prompt));
         assert!(!is_prompt_echo("...", prompt));
-        // Jedno słowo (nawet ze słownika) to prawdziwa wypowiedź.
+        // A single word (even from the dictionary) is a real utterance.
         assert!(!is_prompt_echo("Klaudiusz?", prompt));
         assert!(!is_prompt_echo("Ci", prompt));
-        // Tylko całe słowa: „sense tizen” to nie kawałek „Hisense, Tizen”.
+        // Whole words only: "sense tizen" is not a piece of "Hisense, Tizen".
         assert!(!is_prompt_echo("sense Tizen", prompt));
     }
 }

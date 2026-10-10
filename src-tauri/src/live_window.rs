@@ -1,7 +1,7 @@
-//! Okno „na żywo” przy nagrywaniu spotkania: małe, zawsze na wierzchu, w prawym dolnym rogu.
-//! Pokazuje licznik, poziomy obu ścieżek i ostatnie przepisane wypowiedzi — żeby od razu
-//! było widać, że nagranie i transkrypcja działają. Powstaje przy starcie nagrania, znika
-//! przy jego zatrzymaniu; użytkownik może je zamknąć (schować) wcześniej.
+//! The "live" window while recording a meeting: small, always on top, in the bottom-right corner.
+//! Shows the timer, levels of both tracks and the latest transcribed utterances — so it's
+//! immediately visible that recording and transcription work. Created when recording starts, gone
+//! when it stops; the user can close (hide) it earlier.
 use tauri::{AppHandle, Manager, PhysicalPosition, WebviewUrl, WebviewWindowBuilder};
 
 pub const LABEL: &str = "live";

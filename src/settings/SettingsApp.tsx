@@ -22,7 +22,7 @@ const PANES: { id: PaneId; title: string; icon: LucideIcon }[] = [
   { id: "system", title: "System", icon: ShieldCheck },
 ];
 
-/** Panel z adresu (`index.html#system`) — tak tray otwiera nowe okno od razu na danym panelu. */
+/** Pane from the URL (`index.html#system`) — this is how the tray opens a new window directly on a given pane. */
 function initialPane(): PaneId {
   const hash = window.location.hash.slice(1);
   return PANES.some((p) => p.id === hash) ? (hash as PaneId) : "dictation";
@@ -51,7 +51,7 @@ export default function SettingsApp() {
     api.getSettings().then(setSettings);
     refreshEnv();
     window.addEventListener("focus", refreshEnv);
-    // Już otwarte okno: tray przełącza panel zdarzeniem.
+    // Window already open: the tray switches the pane via an event.
     const un = listen<string>("open-pane", (e) => {
       if (PANES.some((p) => p.id === e.payload)) setPane(e.payload as PaneId);
     });

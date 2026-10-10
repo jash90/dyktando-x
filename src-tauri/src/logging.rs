@@ -1,5 +1,5 @@
-//! Logi: konsola i plik `paths::logs()/dyktando-x.log` — aplikacja okienkowa nie ma konsoli,
-//! a po problemie z nagraniem (przerwy w dźwięku, restart przechwytywania) trzeba mieć co przejrzeć.
+//! Logs: console and the file `paths::logs()/dyktando-x.log` — a windowed app has no console,
+//! and after a recording problem (audio gaps, capture restart) there has to be something to look at.
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use crate::paths;
 
 const FILTER: &str = "info,ort=warn,whisper_rs=warn,transcribe_rs=warn";
-/// Większy plik przy starcie przechodzi do `dyktando-x.1.log` (poprzedni znika).
+/// A larger file is moved to `dyktando-x.1.log` at startup (the previous one is removed).
 const MAX_BYTES: u64 = 5 * 1024 * 1024;
 
 pub fn file() -> PathBuf {
@@ -38,7 +38,7 @@ fn open(path: &Path) -> std::io::Result<File> {
     OpenOptions::new().create(true).append(true).open(path)
 }
 
-/// Każdy wpis na stderr (podgląd w `tauri dev`) i do pliku.
+/// Every entry to stderr (visible in `tauri dev`) and to the file.
 struct Tee(File);
 
 impl Write for Tee {
@@ -54,7 +54,7 @@ impl Write for Tee {
     }
 }
 
-/// Pokazuje plik logu w Finderze / Eksploratorze / menedżerze plików.
+/// Reveals the log file in Finder / Explorer / the file manager.
 #[tauri::command]
 pub fn reveal_logs(app: tauri::AppHandle) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;

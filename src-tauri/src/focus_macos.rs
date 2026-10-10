@@ -1,4 +1,4 @@
-//! macOS: element z fokusem przez Accessibility (bezpośrednie FFI do ApplicationServices).
+//! macOS: the focused element via Accessibility (direct FFI to ApplicationServices).
 use std::ffi::{c_void, CString};
 use std::os::raw::c_char;
 
@@ -91,13 +91,13 @@ pub fn snapshot() -> super::Snapshot {
         };
         let mut pid = 0;
         AXUIElementGetPid(app.0, &mut pid);
-        // Finder rozpoznajemy po ścieżce programu (bez AppKit).
+        // We recognize Finder by the executable path (without AppKit).
         if app_path(pid).is_some_and(|p| p.contains("/Finder.app/")) {
             snap.app = Some("com.apple.finder".into());
         }
         let app_el = Owned(AXUIElementCreateApplication(pid));
         AXUIElementSetMessagingTimeout(app_el.0, 0.25);
-        // Electron (Slack, VS Code, Discord…) buduje drzewo dostępności dopiero na żądanie.
+        // Electron (Slack, VS Code, Discord…) builds the accessibility tree only on demand.
         let manual = cfstr("AXManualAccessibility");
         AXUIElementSetAttributeValue(app_el.0, manual.0, kCFBooleanTrue);
         let focused = match copy_attr(app_el.0, "AXFocusedUIElement") {

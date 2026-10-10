@@ -1,5 +1,5 @@
-//! Składanie transkryptu z dwóch ścieżek (port `TranscriptBuilder` ze Swifta) — czysta logika,
-//! bez audio i modeli: etykiety mówców, usuwanie echa, scalanie wypowiedzi, Markdown.
+//! Assembling the transcript from two tracks (port of `TranscriptBuilder` from Swift) — pure logic,
+//! no audio or models: speaker labels, echo removal, merging utterances, Markdown.
 use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -14,7 +14,7 @@ pub enum Track {
     System,
 }
 
-/// Jedna wypowiedź z jednej ścieżki (fragment VAD przepisany przez silnik).
+/// One utterance from one track (a VAD segment transcribed by the engine).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Utterance {
     pub start: f64,
@@ -23,12 +23,12 @@ pub struct Utterance {
     pub text: String,
     #[serde(default)]
     pub speaker: String,
-    /// Tłumaczenie wypowiedzi (transkrypcja na żywo z tłumaczeniem przez Canary).
+    /// Translation of the utterance (live transcription with translation via Canary).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub translation: Option<String>,
 }
 
-/// Fragment przypisany jednemu mówcy przez rozpoznawanie mówców (ścieżka „system”).
+/// A segment assigned to a single speaker by speaker recognition ("system" track).
 #[derive(Debug, Clone, PartialEq)]
 pub struct SpeakerSegment {
     pub speaker_id: String,
@@ -63,8 +63,8 @@ fn by_start(a: &Utterance, b: &Utterance) -> std::cmp::Ordering {
     a.start.partial_cmp(&b.start).unwrap_or(std::cmp::Ordering::Equal)
 }
 
-/// Etykiety mówców dla ścieżki „system”: największe nakładanie z segmentem mówcy;
-/// numeracja „Rozmówca 1, 2…” w kolejności pierwszego pojawienia się. Bez danych — „Rozmówcy”.
+/// Speaker labels for the "system" track: largest overlap with a speaker segment; numbered
+/// "Rozmówca 1, 2…" ("Participant 1, 2…") in order of first appearance. No data — "Rozmówcy" ("Participants").
 pub fn label_system(utterances: &[Utterance], speakers: Option<&[SpeakerSegment]>) -> Vec<Utterance> {
     let Some(speakers) = speakers.filter(|s| !s.is_empty()) else {
         return utterances.iter().map(|u| Utterance { speaker: OTHERS.into(), ..u.clone() }).collect();
@@ -101,7 +101,7 @@ pub fn label_system(utterances: &[Utterance], speakers: Option<&[SpeakerSegment]
         .collect()
 }
 
-/// Podobieństwo tekstów: część wspólna słów (≥ 3 litery) względem krótszej wypowiedzi.
+/// Text similarity: shared words (≥ 3 letters) relative to the shorter utterance.
 pub fn word_similarity(a: &str, b: &str) -> f64 {
     fn words(s: &str) -> HashSet<String> {
         s.to_lowercase()
@@ -117,8 +117,8 @@ pub fn word_similarity(a: &str, b: &str) -> f64 {
     wa.intersection(&wb).count() as f64 / wa.len().min(wb.len()) as f64
 }
 
-/// Echo: bez słuchawek głos rozmówców z głośników trafia też do mikrofonu. Wypowiedź z mikrofonu,
-/// która nakłada się w czasie z wypowiedzią systemową i ma podobny tekst, odrzucamy.
+/// Echo: without headphones the participants' voices from the speakers also reach the microphone.
+/// A microphone utterance that overlaps in time with a system utterance and has similar text is dropped.
 pub fn remove_echo(mic: &[Utterance], system: &[Utterance], threshold: f64) -> Vec<Utterance> {
     mic.iter()
         .filter(|m| {
@@ -132,7 +132,7 @@ pub fn remove_echo(mic: &[Utterance], system: &[Utterance], threshold: f64) -> V
         .collect()
 }
 
-/// Kolejne wypowiedzi tej samej osoby z przerwą < `gap` łączymy w jedną.
+/// Consecutive utterances of the same person with a gap < `gap` are merged into one.
 pub fn merge_consecutive(utterances: &[Utterance], gap: f64) -> Vec<Utterance> {
     let mut sorted = utterances.to_vec();
     sorted.sort_by(by_start);

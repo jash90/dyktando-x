@@ -1,6 +1,6 @@
-//! Historia dyktowania: każde dyktowanie (tekst, surowy wynik modelu i nagranie 16 kHz) zapisane
-//! lokalnie, tak jak spotkania — `<dane>/Dictations/<id>.json` i `<id>.wav`. Nagranie podlega tej
-//! samej retencji co audio spotkań; tekst zostaje.
+//! Dictation history: every dictation (text, raw model output and 16 kHz recording) is saved
+//! locally, like meetings — `<data>/Dictations/<id>.json` and `<id>.wav`. The recording is subject
+//! to the same retention as meeting audio; the text is kept.
 use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
@@ -19,16 +19,16 @@ pub struct Entry {
     pub id: String,
     pub created_at: DateTime<Local>,
     pub duration_seconds: f64,
-    /// Tekst po poprawkach (interpunkcja ze słów, wielkie litery) — to, co trafiło do pola.
+    /// Text after corrections (punctuation from words, capitalization) — what went into the field.
     pub text: String,
-    /// Wynik modelu przed poprawkami.
+    /// Model output before corrections.
     pub raw: String,
-    /// Model, którym przepisano (nazwa jak w transkryptach spotkań).
+    /// Model used for transcription (name as in meeting transcripts).
     pub engine: String,
-    /// Kody języków (puste = rozpoznany przez model).
+    /// Language codes (empty = detected by the model).
     #[serde(default)]
     pub languages: Vec<String>,
-    /// Wklejone do aktywnego pola (inaczej tylko do schowka).
+    /// Pasted into the active field (otherwise only to the clipboard).
     pub pasted: bool,
     #[serde(default)]
     pub audio_deleted: bool,
@@ -61,7 +61,7 @@ impl History {
         self.root.join(format!("{id}.wav"))
     }
 
-    /// `audio`: nagranie 16 kHz mono f32.
+    /// `audio`: 16 kHz mono f32 recording.
     pub fn save(&self, entry: &Entry, audio: &[f32]) -> Result<()> {
         std::fs::create_dir_all(&self.root)?;
         let mut w = hound::WavWriter::create(self.wav(&entry.id), spec())?;
@@ -81,7 +81,7 @@ impl History {
         serde_json::from_slice(&std::fs::read(self.json(id)).ok()?).ok()
     }
 
-    /// Od najnowszych.
+    /// Newest first.
     pub fn all(&self) -> Vec<Entry> {
         let mut v: Vec<Entry> = std::fs::read_dir(&self.root)
             .map(|it| {
@@ -112,7 +112,7 @@ impl History {
         Ok(r.samples::<i16>().map_while(|s| s.ok()).map(|s| s as f32 / 32768.0).collect())
     }
 
-    /// Usuwa nagrania dyktowań starszych niż `days` dni (tekst zostaje); 0 = nigdy.
+    /// Deletes recordings of dictations older than `days` days (the text is kept); 0 = never.
     pub fn apply_retention(&self, days: u32, now: DateTime<Local>) -> usize {
         if days == 0 {
             return 0;
@@ -133,7 +133,7 @@ fn changed(app: &AppHandle) {
     let _ = app.emit("dictations-changed", ());
 }
 
-/// Zapisuje dyktowanie w historii (wołane po wklejeniu — błąd nie psuje dyktowania).
+/// Saves the dictation to history (called after pasting — an error doesn't break the dictation).
 pub fn record(app: &AppHandle, entry: &Entry, audio: &[f32]) {
     match History::default().save(entry, audio) {
         Ok(()) => changed(app),
@@ -153,7 +153,7 @@ pub fn delete_dictation(app: AppHandle, id: String) -> Result<(), String> {
     Ok(())
 }
 
-/// Okno zapisu i kopia nagrania dyktowania; zwraca ścieżkę, `None` = anulowano.
+/// Save dialog and copy of the dictation recording; returns the path, `None` = cancelled.
 #[tauri::command]
 pub async fn export_dictation_audio(app: AppHandle, id: String) -> Result<Option<String>, String> {
     use tauri_plugin_dialog::DialogExt;
@@ -175,7 +175,7 @@ pub async fn export_dictation_audio(app: AppHandle, id: String) -> Result<Option
     Ok(Some(target.display().to_string()))
 }
 
-/// Przepisuje dyktowanie od nowa innym modelem / w innych językach (gdy wyszło słabo).
+/// Re-transcribes the dictation with another model / in other languages (when it came out poorly).
 #[tauri::command]
 pub async fn retranscribe_dictation(app: AppHandle, id: String, engine: EngineId, languages: Vec<String>) -> Result<Entry, String> {
     Engine::check_languages(engine, &languages).map_err(|e| e.to_string())?;
@@ -254,7 +254,7 @@ mod tests {
         std::fs::remove_dir_all(&h.root).ok();
     }
 
-    /// Prawdziwy model: `cargo test --lib -- --ignored retranscribes_a_saved`.
+    /// Real model: `cargo test --lib -- --ignored retranscribes_a_saved`.
     #[test]
     #[ignore]
     fn retranscribes_a_saved_dictation() {
@@ -275,7 +275,7 @@ mod tests {
     fn empty_retranscription_keeps_the_previous_text() {
         let h = history();
         let e = entry(Local::now(), "Dobry tekst.");
-        h.save(&e, &[0.0; 16_000]).unwrap(); // sama cisza — model nic nie rozpozna
+        h.save(&e, &[0.0; 16_000]).unwrap(); // pure silence — the model will recognize nothing
         assert!(retranscribe(&h, &e.id, EngineId::ParakeetV3, vec!["pl".into()], "").is_err());
         assert_eq!(h.load(&e.id).unwrap().text, "Dobry tekst.");
         std::fs::remove_dir_all(&h.root).ok();

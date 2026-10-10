@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 
-/** Zamienia zdarzenie klawiatury na zapis handy-keys, np. „Ctrl+Alt+R”, „F5”. */
+/** Converts a keyboard event to handy-keys notation, e.g. "Ctrl+Alt+R", "F5". */
 export function eventToShortcut(e: KeyboardEvent, mac: boolean): string | null {
   const code = e.code;
   if (/^(Meta|Control|Alt|Shift)(Left|Right)$/.test(code) || code === "Fn") return null;

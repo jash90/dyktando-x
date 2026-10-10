@@ -1,6 +1,6 @@
-//! Windows: rejestr „CapabilityAccessManager\ConsentStore\microphone” — aplikacja, która teraz
-//! używa mikrofonu, ma `LastUsedTimeStop = 0`. Klasyczne programy są w `NonPackaged` pod ścieżką
-//! .exe (z `#` zamiast `\`), aplikacje ze sklepu pod nazwą rodziny pakietu.
+//! Windows: the "CapabilityAccessManager\ConsentStore\microphone" registry key — an app that is
+//! currently using the microphone has `LastUsedTimeStop = 0`. Classic programs are under
+//! `NonPackaged` by .exe path (with `#` instead of `\`), Store apps by package family name.
 use winreg::enums::HKEY_CURRENT_USER;
 use winreg::RegKey;
 

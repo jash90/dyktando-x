@@ -1,6 +1,6 @@
-//! Silniki rozpoznawania mowy: Parakeet v3 i Canary v2 (ONNX) przez transcribe-rs, Whisper
-//! (whisper.cpp) przez `crate::whisper`.
-//! Wejście zawsze 16 kHz mono f32. Instancja nie jest współdzielona między wątkami naraz.
+//! Speech recognition engines: Parakeet v3 and Canary v2 (ONNX) via transcribe-rs, Whisper
+//! (whisper.cpp) via `crate::whisper`.
+//! Input is always 16 kHz mono f32. An instance is never shared between threads at the same time.
 use anyhow::{anyhow, bail, Result};
 use transcribe_rs::onnx::canary::{CanaryModel, CanaryParams};
 use transcribe_rs::onnx::parakeet::{ParakeetModel, ParakeetParams, TimestampGranularity};
@@ -39,15 +39,15 @@ impl Engine {
         })
     }
 
-    /// Słownik nazw i terminów jako podpowiedź dla Whispera (Parakeet i Canary jej nie obsługują).
+    /// Dictionary of names and terms as a hint for Whisper (Parakeet and Canary don't support it).
     pub fn set_vocabulary(&mut self, vocabulary: &str) {
         if let Engine::Whisper(w) = self {
             w.set_vocabulary(vocabulary);
         }
     }
 
-    /// Czy model przepisze w tych językach (kody whisper.cpp; puste = sam rozpozna język,
-    /// kilka = rozmowa mieszana). Sprawdzane przed wczytaniem modelu.
+    /// Whether the model can transcribe these languages (whisper.cpp codes; empty = detects the language
+    /// itself, several = mixed-language conversation). Checked before loading the model.
     pub fn check_languages(id: EngineId, languages: &[String]) -> Result<()> {
         if let Some(code) = languages.iter().find(|c| languages::name(c).is_none()) {
             bail!("Nieznany język „{code}”");
@@ -67,8 +67,8 @@ impl Engine {
         Ok(())
     }
 
-    /// Czy silnik umie tłumaczyć na `target` (Canary: między angielskim a resztą swoich
-    /// języków; Whisper: tylko na angielski; Parakeet: wcale).
+    /// Whether the engine can translate to `target` (Canary: between English and the rest of its
+    /// languages; Whisper: only to English; Parakeet: not at all).
     pub fn can_translate(&self, language: Language, target: &str) -> bool {
         match self {
             Engine::Canary(_) => {
@@ -80,19 +80,19 @@ impl Engine {
         }
     }
 
-    /// Zwraca sam tekst (bez postprocessingu). Parakeet v3 sam rozpoznaje język;
-    /// Whisper dostaje kod języka albo autodetekcję.
+    /// Returns just the text (no postprocessing). Parakeet v3 detects the language itself;
+    /// Whisper gets a language code or auto-detection.
     pub fn transcribe(&mut self, samples: &[f32], language: Language) -> Result<String> {
         self.transcribe_in(samples, language.code().as_slice())
     }
 
-    /// Jak `transcribe`, ale z listą języków (zob. `check_languages`). Przy kilku Whisper
-    /// najpierw rozpoznaje, w którym z nich jest wypowiedź, i przepisuje w tym języku.
+    /// Like `transcribe`, but with a language list (see `check_languages`). With several, Whisper
+    /// first detects which of them the utterance is in, and transcribes in that language.
     pub fn transcribe_in(&mut self, samples: &[f32], languages: &[&str]) -> Result<String> {
         self.run(samples, languages, None)
     }
 
-    /// Tłumaczenie mowy na `target` (kod języka, np. „en”) — zob. `can_translate`.
+    /// Speech translation to `target` (language code, e.g. "en") — see `can_translate`.
     pub fn translate(&mut self, samples: &[f32], language: Language, target: &str) -> Result<String> {
         if !self.can_translate(language, target) {
             return Err(anyhow!("Ten model nie tłumaczy z {} na {target}", language.code().unwrap_or("auto")));
@@ -106,8 +106,8 @@ impl Engine {
         }
         let text = match self {
             Engine::Parakeet(m) => {
-                // transcribe_with sam dokłada 250 ms ciszy na początku; na końcu dokładamy my,
-                // żeby ostatnie słowo nie było ucięte przy szybkim puszczeniu klawisza.
+                // transcribe_with pads 250 ms of silence at the start itself; we pad the end,
+                // so the last word isn't cut off when the key is released quickly.
                 let mut padded = samples.to_vec();
                 padded.extend(std::iter::repeat(0.0).take(SAMPLE_RATE as usize / 4));
                 m.transcribe_with(
@@ -121,7 +121,7 @@ impl Engine {
                 .text
             }
             Engine::Canary(m) => {
-                // Canary nie rozpoznaje języka sam — „automatycznie” traktujemy jak polski.
+                // Canary doesn't detect the language itself — "automatic" is treated as Polish.
                 let source = match languages {
                     [] => "pl",
                     [one] => one,
@@ -173,11 +173,11 @@ mod tests {
         assert!(Engine::check_languages(whisper, &langs(&["pl", "en", "ja"])).is_ok());
         assert!(Engine::check_languages(whisper, &[]).is_ok());
         assert!(Engine::check_languages(whisper, &langs(&["xx"])).is_err());
-        // Canary: jeden język i tylko europejski.
+        // Canary: one language, and only a European one.
         assert!(Engine::check_languages(EngineId::CanaryV2, &langs(&["de"])).is_ok());
         assert!(Engine::check_languages(EngineId::CanaryV2, &langs(&["pl", "en"])).is_err());
         assert!(Engine::check_languages(EngineId::CanaryV2, &langs(&["ja"])).is_err());
-        // Parakeet rozpoznaje sam, ale tylko spośród europejskich.
+        // Parakeet detects by itself, but only among European languages.
         assert!(Engine::check_languages(EngineId::ParakeetV3, &langs(&["pl", "en"])).is_ok());
         assert!(Engine::check_languages(EngineId::ParakeetV3, &langs(&["pl", "ja"])).is_err());
     }
@@ -213,14 +213,14 @@ mod tests {
         assert!(hits * 10 >= expected.len() * 8, "trafione {hits}/{}: {text}", expected.len());
     }
 
-    /// Pobiera model (~670 MB) przy pierwszym uruchomieniu: `cargo test -- --ignored parakeet`.
+    /// Downloads the model (~670 MB) on first run: `cargo test -- --ignored parakeet`.
     #[test]
     #[ignore]
     fn parakeet_transcribes_polish() {
         check(EngineId::ParakeetV3);
     }
 
-    /// ~1,6 GB: `cargo test -- --ignored whisper_turbo`.
+    /// ~1.6 GB: `cargo test -- --ignored whisper_turbo`.
     #[test]
     #[ignore]
     fn whisper_turbo_transcribes_polish() {
@@ -234,7 +234,7 @@ mod tests {
         check(EngineId::CanaryV2);
     }
 
-    /// Tłumaczenie pl→en przez Canary: `cargo test -- --ignored canary_translates`.
+    /// pl→en translation via Canary: `cargo test -- --ignored canary_translates`.
     #[test]
     #[ignore]
     fn canary_translates_polish_to_english() {
@@ -250,7 +250,7 @@ mod tests {
         assert!(!got.contains(&"wizy".to_string()), "{text}");
     }
 
-    /// Rozmowa mieszana: każda wypowiedź w języku wybranym spośród zaznaczonych.
+    /// Mixed-language conversation: each utterance in a language picked from the selected ones.
     /// `cargo test -- --ignored whisper_turbo_picks`.
     #[test]
     #[ignore]

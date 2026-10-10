@@ -1,5 +1,5 @@
-//! Linux: strumienie nagrywania PulseAudio/PipeWire (`pactl list source-outputs`) — nazwa
-//! programu z `application.process.binary`.
+//! Linux: PulseAudio/PipeWire recording streams (`pactl list source-outputs`) — program name
+//! from `application.process.binary`.
 use std::process::Command;
 
 pub fn processes_using_microphone() -> Vec<String> {
@@ -8,8 +8,8 @@ pub fn processes_using_microphone() -> Vec<String> {
     parse(&String::from_utf8_lossy(&out.stdout), &own)
 }
 
-/// Bloki „Source Output #N”: bierzemy binarkę, pomijając nasze własne nagrywanie (parec z naszym PID-em jako rodzicem
-/// rozpoznajemy po nazwie klienta „Dyktando X”).
+/// "Source Output #N" blocks: we take the binary, skipping our own recording (parec with our PID as parent,
+/// recognised by the client name "Dyktando X").
 pub fn parse(text: &str, _own_pid: &str) -> Vec<String> {
     let mut out = Vec::new();
     for block in text.split("Source Output #").skip(1) {

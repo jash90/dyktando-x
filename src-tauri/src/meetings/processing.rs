@@ -1,6 +1,6 @@
-//! Zadania na spotkaniach (jedno naraz): transkrypcja i podsumowanie AI, z postępem wysyłanym do
-//! interfejsu (`meeting-job`) i przerywaniem. Po zatrzymaniu nagrania — automatyczny ciąg
-//! transkrypcja → (opcjonalnie) podsumowanie, zgodnie z ustawieniami.
+//! Meeting jobs (one at a time): transcription and AI summary, with progress sent to the
+//! UI (`meeting-job`) and cancellation. After recording stops — an automatic chain
+//! transcription → (optionally) summary, according to the settings.
 use anyhow::{anyhow, Result};
 use serde::Serialize;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -75,10 +75,10 @@ fn event(id: &str, kind: JobKind, step: impl Into<String>, fraction: f32) -> Job
     JobEvent { meeting_id: id.into(), kind, step: step.into(), fraction, finished: false, error: None }
 }
 
-/// Pobiera brakujące modele potrzebne do przepisania: VAD (2 MB), model mówców (27 MB) i sam
-/// silnik (np. Whisper ustawiony jako domyślny, ale jeszcze niepobrany — 1,6 GB). Pobieranie
-/// jest widoczne (i do przerwania) także w Ustawieniach → Modele; „Przerwij” przy spotkaniu
-/// też je przerywa. Gdy ten sam model już się pobiera z Ustawień, czekamy na koniec.
+/// Downloads missing models needed for transcription: VAD (2 MB), the speaker model (27 MB) and the
+/// engine itself (e.g. Whisper set as default but not downloaded yet — 1.6 GB). The download is
+/// visible (and cancellable) in Settings → Models as well; "Cancel" on the meeting cancels it
+/// too. If the same model is already downloading from Settings, we wait for it to finish.
 async fn ensure_support_models(app: &AppHandle, id: &str, diarize: bool, engine: EngineId, cancel: &Arc<AtomicBool>) -> Result<()> {
     let mut needed = vec![models::asset(AssetId::SileroVad)];
     if diarize {
@@ -115,7 +115,7 @@ async fn ensure_support_models(app: &AppHandle, id: &str, diarize: bool, engine:
                     if percent != last_percent {
                         last_percent = percent;
                         emit(&app2, event(id, JobKind::Transcribe, format!("Pobieranie: {title} ({percent}%)"), f * 0.05));
-                        // Ten sam postęp w Ustawieniach → Modele.
+                        // The same progress in Settings → Models.
                         let _ = app2.emit("model-download", crate::DownloadEvent { key: key2.clone(), done, total, finished: false, error: None });
                     }
                 })
@@ -132,7 +132,7 @@ async fn ensure_support_models(app: &AppHandle, id: &str, diarize: bool, engine:
     Ok(())
 }
 
-/// `languages: None` = język spotkań z ustawień (zob. `transcriber::Options::languages`).
+/// `languages: None` = meeting language from settings (see `transcriber::Options::languages`).
 pub async fn transcribe(app: AppHandle, id: String, engine: Option<EngineId>, languages: Option<Vec<String>>) -> Result<()> {
     let state = app.state::<AppState>();
     let settings = state.settings.lock().unwrap().clone();
@@ -147,8 +147,8 @@ pub async fn transcribe(app: AppHandle, id: String, engine: Option<EngineId>, la
         emit(&app, event(&id, JobKind::Transcribe, "Przygotowanie", 0.0));
         let engine = engine.unwrap_or(settings.meeting_engine);
         let languages = languages.unwrap_or_else(|| settings.meeting_language.code().map(String::from).into_iter().collect());
-        // Pobieranie modeli i transkrypcja razem: błąd albo przerwanie którejkolwiek części
-        // przywraca stan spotkania niżej (a nie zostawia go w „przepisywaniu”).
+        // Model download and transcription together: an error or cancellation of either part
+        // restores the meeting state below (instead of leaving it in "transcribing").
         let r = async {
             ensure_support_models(&app, &id, settings.meeting_diarization, engine, &cancel).await?;
             let opts = Options {
@@ -176,7 +176,7 @@ pub async fn transcribe(app: AppHandle, id: String, engine: Option<EngineId>, la
                 Ok(())
             }
             Err(e) => {
-                // Przerwanie wraca do poprzedniego stanu, błąd zapisujemy przy spotkaniu.
+                // Cancellation returns to the previous state, an error is saved on the meeting.
                 let cancelled = cancel.load(Ordering::Relaxed);
                 store.update(&id, |m| {
                     m.state = if cancelled { previous } else { State::Failed };
@@ -214,7 +214,7 @@ pub async fn summarize(app: AppHandle, id: String, provider: ProviderId, model: 
             let step = if total > 1 { format!("{label} — część {}/{}", (done + 1).min(total), total) } else { label.clone() };
             emit(&app2, event(&id2, JobKind::Summarize, step, 0.05 + 0.9 * done as f32 / total.max(1) as f32));
         });
-        // Przerwanie: porzucamy zapytanie (future), stan wraca do poprzedniego.
+        // Cancellation: we drop the request (future), the state returns to the previous one.
         let outcome = tokio::select! {
             r = work => Some(r),
             _ = async { while !cancel.load(Ordering::Relaxed) { tokio::time::sleep(std::time::Duration::from_millis(200)).await } } => None,
@@ -252,8 +252,8 @@ fn finish(app: &AppHandle, id: &str, kind: JobKind, error: Option<String>) {
     let _ = app.emit("meetings-changed", ());
 }
 
-/// Import nagrania z pliku: tworzy spotkanie od razu (żeby pojawiło się na liście), a w tle
-/// wczytuje plik z postępem, potem przepisuje i — jeśli włączone — podsumowuje.
+/// Recording import from a file: creates the meeting right away (so it appears in the list), and in
+/// the background loads the file with progress, then transcribes and — if enabled — summarises.
 pub fn import_file(app: AppHandle, path: std::path::PathBuf) -> Result<Meeting> {
     let store = Store::default();
     let meeting = import::create(&store, &path)?;
@@ -269,7 +269,7 @@ pub fn import_file(app: AppHandle, path: std::path::PathBuf) -> Result<Meeting> 
         emit(&app, event(&id, JobKind::Import, "Wczytywanie pliku", 0.0));
         let (app2, id2) = (app.clone(), id.clone());
         let r = tauri::async_runtime::spawn_blocking(move || {
-            // Postęp co 1 % — przy długim pliku pakietów są dziesiątki tysięcy.
+            // Progress every 1 % — a long file has tens of thousands of packets.
             let mut shown = 0.0f32;
             import::fill(&store, &m, &path, &cancel, |f| {
                 if f - shown >= 0.01 {
@@ -294,8 +294,8 @@ pub fn import_file(app: AppHandle, path: std::path::PathBuf) -> Result<Meeting> 
     Ok(meeting)
 }
 
-/// Po zatrzymaniu nagrania: transkrypcja (jeśli włączona), potem podsumowanie (jeśli włączone
-/// i jest klucz domyślnego dostawcy).
+/// After recording stops: transcription (if enabled), then a summary (if enabled and there's
+/// a key for the default provider).
 pub fn after_recording(app: AppHandle, id: String) {
     tauri::async_runtime::spawn(async move {
         let settings = app.state::<AppState>().settings.lock().unwrap().clone();

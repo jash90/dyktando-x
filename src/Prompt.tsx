@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { Circle } from "lucide-react";
 
-/** Podpowiedź „Wykryto spotkanie w … — nagrać?” (osobne, małe okno bez fokusu). */
+/** The „Wykryto spotkanie w … — nagrać?” ("Meeting detected in … — record?") prompt (a separate small window without focus). */
 export default function Prompt() {
   const app = new URLSearchParams(window.location.hash.split("?")[1] ?? "").get("app") ?? "aplikacji do rozmów";
   const answer = (record: boolean) => invoke("prompt_answer", { record }).catch(() => {});

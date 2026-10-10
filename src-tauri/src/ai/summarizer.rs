@@ -1,5 +1,5 @@
-//! Podsumowanie transkryptu przez wybranego dostawcę. Krótki transkrypt → jedno zapytanie;
-//! dłuższy niż mieści model → notatki z kolejnych części (ze znacznikami czasu) i ich złożenie.
+//! Transcript summary via the chosen provider. Short transcript → a single request;
+//! longer than the model fits → notes from successive parts (with timestamps) and combining them.
 use chrono::{DateTime, Datelike, Local};
 use std::path::{Path, PathBuf};
 
@@ -43,7 +43,7 @@ jeszcze końcowe podsumowanie — nic nie pomijaj."
 pub const FINAL_INSTRUCTION: &str = "Poniżej są notatki z kolejnych części jednego spotkania (w kolejności). Złóż z nich jedno końcowe \
 podsumowanie całego spotkania w wymaganym formacie, łącząc powtórzenia.";
 
-/// Prompt z ustawień albo domyślny, gdy pusty.
+/// Prompt from settings, or the default when empty.
 pub fn effective_prompt(custom: Option<&str>) -> &str {
     match custom {
         Some(p) if !p.trim().is_empty() => p,
@@ -51,8 +51,8 @@ pub fn effective_prompt(custom: Option<&str>) -> &str {
     }
 }
 
-/// Dzieli transkrypt na części ≤ `limit` znaków, tnąc tylko między liniami (wypowiedziami).
-/// Pojedyncza linia dłuższa niż limit zostaje cała w osobnej części.
+/// Splits the transcript into parts ≤ `limit` characters, cutting only between lines (utterances).
+/// A single line longer than the limit stays whole in a separate part.
 pub fn chunks(transcript: &str, limit: usize) -> Vec<String> {
     if transcript.chars().count() <= limit {
         return vec![transcript.to_string()];
@@ -78,7 +78,7 @@ pub fn chunks(transcript: &str, limit: usize) -> Vec<String> {
     parts
 }
 
-/// Coś, co odpowiada na (system, user) — `LlmConfig` w aplikacji, atrapa w testach.
+/// Something that answers (system, user) — `LlmConfig` in the app, a mock in tests.
 pub(crate) trait Completer {
     async fn complete(&self, system: &str, user: &str, max_tokens: u32) -> Result<String, LlmError>;
 }
@@ -89,8 +89,8 @@ impl Completer for LlmConfig {
     }
 }
 
-/// Podsumowanie transkryptu. `progress(zrobione, wszystkie)` liczy zapytania do modelu:
-/// jedno dla krótkiego transkryptu, inaczej części + złożenie.
+/// Transcript summary. `progress(done, total)` counts model requests:
+/// one for a short transcript, otherwise the parts + combining.
 pub async fn summarize(
     config: &LlmConfig,
     transcript_markdown: &str,
@@ -133,7 +133,7 @@ pub(crate) async fn summarize_with<C: Completer>(
     Ok(out)
 }
 
-/// Model bezpieczny w nazwie pliku: wszystko poza `[A-Za-z0-9._-]` → `-`.
+/// Filename-safe model: everything outside `[A-Za-z0-9._-]` → `-`.
 pub fn safe_model(model: &str) -> String {
     model
         .chars()
@@ -141,14 +141,14 @@ pub fn safe_model(model: &str) -> String {
         .collect()
 }
 
-/// Nazwa pliku w `summaries/`: `<rrrr-mm-dd_gg-mm-ss>-<dostawca>-<model>.md` (historia — nic nie nadpisujemy).
+/// File name in `summaries/`: `<yyyy-mm-dd_hh-mm-ss>-<provider>-<model>.md` (history — we overwrite nothing).
 pub fn summary_file_name(provider: ProviderId, model: &str, now: DateTime<Local>) -> String {
     format!("{}-{}-{}.md", now.format("%Y-%m-%d_%H-%M-%S"), provider.key(), safe_model(model))
 }
 
 const MONTHS_SHORT: [&str; 12] = ["sty", "lut", "mar", "kwi", "maj", "cze", "lip", "sie", "wrz", "paź", "lis", "gru"];
 
-/// Krótka data po polsku jak `PolishDate.short`: „5 paź, 14:03”, z rokiem, gdy inny niż bieżący.
+/// Short Polish date like `PolishDate.short`: "5 paź, 14:03", with the year if not the current one.
 pub fn polish_short(date: DateTime<Local>, now: DateTime<Local>) -> String {
     let month = MONTHS_SHORT[date.month0() as usize];
     if date.year() == now.year() {
@@ -158,7 +158,7 @@ pub fn polish_short(date: DateTime<Local>, now: DateTime<Local>) -> String {
     }
 }
 
-/// Treść pliku: nagłówek z dostawcą, modelem i datą, potem podsumowanie.
+/// File content: header with provider, model and date, then the summary.
 pub fn summary_document(provider: ProviderId, model: &str, summary: &str, now: DateTime<Local>) -> String {
     format!(
         "> Podsumowanie wygenerowane przez {} ({model}) · {}\n\n{summary}\n",
@@ -167,7 +167,7 @@ pub fn summary_document(provider: ProviderId, model: &str, summary: &str, now: D
     )
 }
 
-/// Zapisuje podsumowanie do `folder` (np. `<spotkanie>/summaries`) i zwraca ścieżkę pliku.
+/// Saves the summary to `folder` (e.g. `<meeting>/summaries`) and returns the file path.
 pub fn save(summary: &str, folder: &Path, config: &LlmConfig, now: DateTime<Local>) -> std::io::Result<PathBuf> {
     std::fs::create_dir_all(folder)?;
     let path = folder.join(summary_file_name(config.provider, &config.model, now));
@@ -177,7 +177,7 @@ pub fn save(summary: &str, folder: &Path, config: &LlmConfig, now: DateTime<Loca
     Ok(path)
 }
 
-/// Najnowsze podsumowanie w folderze (pliki mają datę w nazwie, więc wystarczy sortowanie).
+/// Newest summary in the folder (files have the date in their name, so sorting is enough).
 #[allow(dead_code)]
 pub fn latest(folder: &Path) -> Option<PathBuf> {
     let mut names: Vec<String> = std::fs::read_dir(folder)
@@ -230,9 +230,9 @@ mod tests {
     #[test]
     fn chunks_short_is_single_and_counts_chars_not_bytes() {
         assert_eq!(chunks("krótko", 100), ["krótko"]);
-        let s = "ż".repeat(10); // 20 bajtów, 10 znaków
+        let s = "ż".repeat(10); // 20 bytes, 10 characters
         assert_eq!(chunks(&s, 10), [s.clone()]);
-        // Linia dłuższa niż limit nie jest cięta.
+        // A line longer than the limit is not cut.
         assert_eq!(chunks(&format!("a\n{}\nb", "x".repeat(20)), 5), ["a", &"x".repeat(20), "b"]);
     }
 

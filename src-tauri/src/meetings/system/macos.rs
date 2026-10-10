@@ -1,7 +1,7 @@
-//! Core Audio process tap (macOS 14.4+), wzór: github.com/insidegui/AudioCap i wersja Swift.
-//! Tap globalny (stereo) z wykluczeniem własnego procesu → prywatne urządzenie zbiorcze →
-//! IOProc na własnej kolejce. Zgody nie da się sprawdzić z góry: tap utworzony przed nią
-//! nie oddaje żadnych buforów (wykrywa to `MeetingRecorder` i tworzy tap od nowa).
+//! Core Audio process tap (macOS 14.4+), based on github.com/insidegui/AudioCap and the Swift version.
+//! Global (stereo) tap excluding our own process → private aggregate device → IOProc on our
+//! own queue. Permission can't be checked up front: a tap created before it is granted
+//! delivers no buffers (`MeetingRecorder` detects this and recreates the tap).
 use anyhow::{anyhow, Result};
 use block2::RcBlock;
 use dispatch2::{DispatchQueue, DispatchRetained};
@@ -71,8 +71,8 @@ fn own_process_object() -> Option<AudioObjectID> {
     obj.ok().filter(|o| *o != kAudioObjectUnknown)
 }
 
-/// UID wyjścia, na którym grają aplikacje (Meet, Zoom, Teams). Urządzenie „dźwięków systemowych”
-/// bywa inne (np. wirtualne Background Music) i ma inną częstotliwość — tylko jako zapas.
+/// UID of the output that apps play on (Meet, Zoom, Teams). The "system sounds" device may
+/// differ (e.g. virtual Background Music) and have a different sample rate — fallback only.
 fn default_output_uid() -> Result<String> {
     output_uid(kAudioHardwarePropertyDefaultOutputDevice).or_else(|_| output_uid(kAudioHardwarePropertyDefaultSystemOutputDevice))
 }
@@ -86,7 +86,7 @@ fn output_uid(selector: u32) -> Result<String> {
         if uid.is_null() {
             return Err(anyhow!("Dźwięk systemowy: brak UID wyjścia"));
         }
-        // Właściwość zwraca CFString na +1 — przejmujemy własność.
+        // The property returns a CFString at +1 — we take ownership.
         let uid: Retained<NSString> = Retained::from_raw(uid as *mut NSString).ok_or_else(|| anyhow!("UID"))?;
         Ok(uid.to_string())
     }
@@ -104,7 +104,7 @@ fn dict(pairs: &[(&CStr, Retained<AnyObject>)]) -> Retained<NSDictionary<NSStrin
 }
 
 fn obj<T: objc2::Message>(r: Retained<T>) -> Retained<AnyObject> {
-    // Każdy obiekt Foundation jest AnyObject — rzutowanie bez zmiany licznika referencji.
+    // Every Foundation object is an AnyObject — cast without changing the reference count.
     unsafe { Retained::cast_unchecked(r) }
 }
 
@@ -116,11 +116,11 @@ pub struct Capture {
     proc_id: AudioDeviceIOProcID,
     _block: Option<IoBlock>,
     _queue: Option<DispatchRetained<DispatchQueue>>,
-    /// Wyjście, na którym tap był założony (urządzenie zbiorcze bierze z niego takt).
+    /// The output the tap was created on (the aggregate device takes its clock from it).
     output: String,
 }
 
-// Identyfikatory Core Audio i blok są bezpieczne do przeniesienia między wątkami.
+// Core Audio identifiers and the block are safe to move between threads.
 unsafe impl Send for Capture {}
 
 impl Capture {
@@ -129,7 +129,7 @@ impl Capture {
         match unsafe { c.start_tap(sink) } {
             Ok(rate) => Ok((c, rate)),
             Err(e) => {
-                c.teardown(); // nie zostawiaj w systemie tapu ani urządzenia zbiorczego z połowy startu
+                c.teardown(); // don't leave a half-started tap or aggregate device in the system
                 Err(e)
             }
         }
@@ -178,8 +178,8 @@ impl Capture {
         let mut aggregate = kAudioObjectUnknown;
         check(AudioHardwareCreateAggregateDevice(cf, NonNull::from(&mut aggregate)), "nie udało się utworzyć urządzenia zbiorczego")?;
         self.aggregate = aggregate;
-        // Bufory przychodzą w takcie urządzenia zbiorczego (tap jest do niego dopasowywany), nie
-        // w formacie tapu: z wyjściem 16 kHz i tapem 48 kHz liczenie po tapie gubiło 2/3 dźwięku.
+        // Buffers arrive in the aggregate device's clock (the tap is matched to it), not in the
+        // tap's format: with a 16 kHz output and a 48 kHz tap, counting by the tap lost 2/3 of the audio.
         let rate = match get_property::<f64>(aggregate, kAudioDevicePropertyNominalSampleRate, None, 0.0) {
             Ok(r) if r > 0.0 => r.round() as u32,
             _ => tap_rate,
@@ -194,7 +194,7 @@ impl Capture {
             let (Ok(mut out), Ok(mut sink)) = (mono.lock(), sink.lock()) else { return };
             out.clear();
             if non_interleaved {
-                // Osobny bufor na kanał — uśredniamy (inaczej zostałby tylko lewy kanał).
+                // Separate buffer per channel — we average them (otherwise only the left channel would remain).
                 let frames = buffers.first().map_or(0, |b| b.mDataByteSize as usize / 4);
                 out.resize(frames, 0.0);
                 let n = buffers.len().max(1) as f32;
@@ -206,8 +206,8 @@ impl Capture {
                     }
                 }
             } else if let Some(b) = buffers.last() {
-                // Tap to ostatni strumień wejściowy urządzenia zbiorczego (wyjście z mikrofonem,
-                // np. słuchawki, dokłada własny strumień przed nim).
+                // The tap is the last input stream of the aggregate device (an output with a microphone,
+                // e.g. headphones, adds its own stream before it).
                 if b.mData.is_null() { return; }
                 let ch = (b.mNumberChannels as usize).max(1).min(channels.max(1));
                 let data = std::slice::from_raw_parts(b.mData as *const f32, b.mDataByteSize as usize / 4);
@@ -253,8 +253,8 @@ impl Capture {
         self.teardown();
     }
 
-    /// Domyślne wyjście jest już inne niż to, na którym założono tap (np. podłączone
-    /// słuchawki Bluetooth). Urządzenie zbiorcze zostaje przy starym — dźwięk potrafi zamilknąć.
+    /// The default output is now different from the one the tap was created on (e.g. Bluetooth
+    /// headphones connected). The aggregate device stays on the old one — audio may go silent.
     pub fn device_changed(&self) -> bool {
         default_output_uid().is_ok_and(|uid| uid != self.output)
     }

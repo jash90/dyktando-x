@@ -1,10 +1,10 @@
-//! Globalne skróty (handy-keys: macOS CGEventTap, Windows hook, Linux evdev — działa też na
-//! Waylandzie, gdy użytkownik ma dostęp do /dev/input).
+//! Global shortcuts (handy-keys: macOS CGEventTap, Windows hook, Linux evdev — also works on
+//! Wayland when the user has access to /dev/input).
 //!
-//! Zwykłe skróty (F5, ⌃⌥R…) idą przez `HotkeyManager` z blokowaniem, żeby F5 nie odświeżał
-//! przeglądarki. Push-to-talk samym modyfikatorem (prawy ⌘/Ctrl) idzie osobnym, nieblokującym
-//! nasłuchem — zablokowany prawy ⌘ zepsułby skróty typu ⌘C — z anulowaniem, gdy w trakcie
-//! wciśnięto inny klawisz (port `ModifierPTTState` ze Swifta).
+//! Regular shortcuts (F5, ⌃⌥R…) go through `HotkeyManager` with blocking, so F5 doesn't refresh
+//! the browser. Modifier-only push-to-talk (right ⌘/Ctrl) goes through a separate, non-blocking
+//! listener — a blocked right ⌘ would break shortcuts like ⌘C — with cancellation when another key
+//! is pressed meanwhile (a port of `ModifierPTTState` from the Swift version).
 use anyhow::{anyhow, Result};
 use handy_keys::{Hotkey, HotkeyManager, HotkeyState, KeyEvent, KeyboardListener, Modifiers};
 use std::collections::HashMap;
@@ -17,7 +17,7 @@ use std::time::Duration;
 pub enum Action {
     PushToTalkDown,
     PushToTalkUp,
-    /// Nagrywanie trzymanym modyfikatorem przerwane innym klawiszem — odrzuć nagranie.
+    /// Recording with a held modifier interrupted by another key — discard the recording.
     Cancel,
     Toggle,
     Meeting,
@@ -34,7 +34,7 @@ pub struct Config {
 pub struct Hotkeys {
     stop: Arc<AtomicBool>,
     threads: Vec<JoinHandle<()>>,
-    /// Ostrzeżenia dla użytkownika (np. brak uprawnień), pokazywane w ustawieniach.
+    /// Warnings for the user (e.g. missing permissions), shown in settings.
     pub warnings: Vec<String>,
 }
 
@@ -178,7 +178,7 @@ impl Kind {
     }
 }
 
-/// Stan push-to-talk samym modyfikatorem — czysta logika, testowana.
+/// Modifier-only push-to-talk state — pure logic, tested.
 #[derive(Debug)]
 pub struct ModifierPtt {
     target: Modifiers,
@@ -194,20 +194,20 @@ impl ModifierPtt {
 
     pub fn handle(&mut self, ev: &KeyEvent) -> Option<Action> {
         if ev.key.is_some() {
-            // Zwykły klawisz przy trzymanym modyfikatorze (⌘C, Ctrl+Tab…) — to skrót.
+            // A regular key while the modifier is held (⌘C, Ctrl+Tab…) — that's a shortcut.
             return if ev.is_key_down && self.held { self.cancel() } else { None };
         }
         let changed = ev.changed_modifier.unwrap_or(self.last ^ ev.modifiers);
         self.last = ev.modifiers;
         if changed != self.target {
-            // Inny modyfikator w trakcie (np. prawy ⌘ + ⇧) — skrót, nie dyktowanie.
+            // Another modifier meanwhile (e.g. right ⌘ + ⇧) — a shortcut, not dictation.
             return if self.held && ev.modifiers.intersects(changed) { self.cancel() } else { None };
         }
         let down = ev.modifiers.contains(self.target);
         if down && !self.held {
             self.held = true;
             self.cancelled = false;
-            // Wciśnięty razem z innym modyfikatorem od początku — nie startujemy.
+            // Pressed together with another modifier from the start — we don't start.
             if ev.modifiers != self.target {
                 self.cancelled = true;
                 return None;
@@ -258,7 +258,7 @@ mod tests {
         assert_eq!(s.handle(&key(R, Key::C, true)), Some(Action::Cancel));
         assert_eq!(s.handle(&key(R, Key::V, true)), None);
         assert_eq!(s.handle(&modev(Modifiers::empty(), R)), None);
-        // następne przytrzymanie działa normalnie
+        // the next hold works normally
         assert_eq!(s.handle(&modev(R, R)), Some(Action::PushToTalkDown));
     }
 

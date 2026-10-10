@@ -12,7 +12,7 @@ export interface ProviderConfig {
 
 export interface Settings {
   engine: EngineId;
-  /** Język dyktowania. */
+  /** Dictation language. */
   language: Language;
   input_device: string | null;
   shortcut_push_to_talk: string;
@@ -20,15 +20,15 @@ export interface Settings {
   modifier_push_to_talk: string;
   paste_mode: PasteMode;
   hud_enabled: boolean;
-  /** Zapisuj każde dyktowanie (tekst i nagranie) w historii. */
+  /** Save every dictation (text and recording) in the history. */
   dictation_history: boolean;
-  /** Model do przepisywania po nagraniu i importu. */
+  /** Model for transcription after recording and for imports. */
   meeting_engine: EngineId;
-  /** Model transkrypcji na żywo. */
+  /** Live transcription model. */
   meeting_live_engine: EngineId;
-  /** Słownik nazw i terminów — podpowiedź dla Whispera (dyktowanie i spotkania). */
+  /** Vocabulary of names and terms — a prompt hint for Whisper (dictation and meetings). */
   vocabulary: string;
-  /** Język spotkań (niezależny od dyktowania). */
+  /** Meetings language (independent of dictation). */
   meeting_language: Language;
   meeting_live_transcription: boolean;
   meeting_live_translate_to: string;
@@ -83,7 +83,7 @@ export type HudState =
 export const api = {
   getSettings: () => invoke<Settings>("get_settings"),
   languages: () => invoke<LanguageInfo[]>("list_languages"),
-  /** Pokazuje plik logu aplikacji w menedżerze plików. */
+  /** Reveals the app log file in the file manager. */
   revealLogs: () => invoke<void>("reveal_logs"),
   saveSettings: (settings: Settings) => invoke<string[]>("save_settings", { settings }),
   listInputDevices: () => invoke<{ devices: string[]; default: string | null }>("list_input_devices"),
@@ -105,7 +105,7 @@ export const api = {
 export interface UpdateInfo {
   version: string;
   current_version: string;
-  /** Notatki wydania (Markdown z GitHub Release). */
+  /** Release notes (Markdown from the GitHub Release). */
   notes: string | null;
   date: string | null;
 }
@@ -123,7 +123,7 @@ export function formatBytes(n: number): string {
   return `${Math.round(n / 1e3)} kB`;
 }
 
-/** Języki tłumaczenia na żywo (Canary 1B v2 tłumaczy między angielskim a pozostałymi). */
+/** Live translation languages (Canary 1B v2 translates between English and the others). */
 export const TRANSLATION_TARGETS: [string, string][] = [
   ["", "nie tłumacz"],
   ["en", "angielski"],
@@ -146,7 +146,7 @@ export const ENGINE_LABELS: Record<EngineId, string> = {
   whisper_large_v3: "Whisper large-v3",
 };
 
-// MARK: - Spotkania i AI
+// MARK: - Meetings and AI
 
 export type MeetingState =
   | "recording"
@@ -169,16 +169,16 @@ export interface Meeting {
   title: string | null;
   audioDeleted: boolean;
   transcriptEngine: string | null;
-  /** Języki ostatniej transkrypcji (puste = rozpoznane przez model); `null` = sprzed tej opcji. */
+  /** Languages of the last transcription (empty = detected by the model); `null` = predates this option. */
   transcriptLanguages: string[] | null;
   lastError: string | null;
-  /** Przerwy w nagraniu: dźwięk ścieżki się urwał i był wznawiany. */
+  /** Gaps in the recording: the track's audio dropped out and was resumed. */
   audioGaps: AudioGap[];
 }
 
 export interface AudioGap {
   track: AudioTrack;
-  /** Sekundy od startu nagrania. */
+  /** Seconds since the start of the recording. */
   start: number;
   seconds: number;
 }
@@ -186,7 +186,7 @@ export interface AudioGap {
 export interface LanguageInfo {
   code: string;
   name: string;
-  /** Obsługiwany też przez Parakeeta i Canary (inaczej tylko Whisper). */
+  /** Also supported by Parakeet and Canary (otherwise Whisper only). */
   european: boolean;
 }
 
@@ -195,12 +195,12 @@ export interface MeetingDetail {
   transcript: string | null;
   summaries: { name: string; content: string }[];
   folder: string;
-  /** Ścieżki z nagraniem do pobrania: `mic` = Ty, `system` = rozmówcy. */
+  /** Recorded tracks available for download: `mic` = you, `system` = the other participants. */
   tracks: AudioTrack[];
 }
 
 export type AudioTrack = "mic" | "system";
-/** Co pobrać: jedną ścieżkę albo obie zmiksowane (`mixed`). */
+/** What to download: a single track or both mixed together (`mixed`). */
 export type AudioExport = AudioTrack | "mixed";
 
 export interface RecordingStatus {
@@ -225,16 +225,16 @@ export interface Utterance {
 export interface LivePayload {
   meeting_id: string;
   utterance: Utterance | null;
-  /** Tekst roboczy trwającej wypowiedzi danej ścieżki; pusty tekst = usuń roboczy. */
+  /** Draft text of the ongoing utterance on a given track; empty text = remove the draft. */
   partial: Utterance | null;
   error: string | null;
 }
 
-/** Teksty robocze trwających wypowiedzi, po jednym na ścieżkę. */
+/** Draft texts of ongoing utterances, one per track. */
 export type LiveDrafts = Partial<Record<Utterance["track"], Utterance>>;
 
-/** Nowy stan tekstów roboczych po zdarzeniu `meeting-live`: domknięta wypowiedź zastępuje
- *  roboczy swojej ścieżki, roboczy z pustym tekstem go usuwa. */
+/** New draft-text state after a `meeting-live` event: a finalized utterance replaces
+ *  its track's draft, a draft with empty text removes it. */
 export function nextDrafts(prev: LiveDrafts, { utterance, partial }: LivePayload): LiveDrafts {
   const done = utterance ?? (partial && !partial.text ? partial : null);
   if (done) {
@@ -244,7 +244,7 @@ export function nextDrafts(prev: LiveDrafts, { utterance, partial }: LivePayload
   return partial ? { ...prev, [partial.track]: partial } : prev;
 }
 
-/** Robocze w kolejności czasu — do wyświetlenia za domkniętymi wypowiedziami. */
+/** Drafts in chronological order — to display after the finalized utterances. */
 export function draftList(drafts: LiveDrafts): Utterance[] {
   return Object.values(drafts)
     .filter((u): u is Utterance => !!u)
@@ -269,18 +269,18 @@ export interface ProviderInfo {
   model_placeholder: string;
 }
 
-/** Dyktowanie zapisane w historii. */
+/** A dictation saved in the history. */
 export interface DictationEntry {
   id: string;
   createdAt: string;
   durationSeconds: number;
-  /** Tekst po poprawkach — to, co trafiło do pola. */
+  /** Text after corrections — what ended up in the field. */
   text: string;
-  /** Wynik modelu przed poprawkami. */
+  /** Model output before corrections. */
   raw: string;
   engine: string;
   languages: string[];
-  /** Wklejone do aktywnego pola (inaczej tylko do schowka). */
+  /** Pasted into the active field (otherwise only copied to the clipboard). */
   pasted: boolean;
   audioDeleted: boolean;
 }
@@ -288,7 +288,7 @@ export interface DictationEntry {
 export const dictationsApi = {
   list: () => invoke<DictationEntry[]>("list_dictations"),
   remove: (id: string) => invoke<void>("delete_dictation", { id }),
-  /** Okno zapisu nagrania; ścieżka pliku albo `null` = anulowano. */
+  /** Save dialog for the recording; file path or `null` = cancelled. */
   exportAudio: (id: string) => invoke<string | null>("export_dictation_audio", { id }),
   retranscribe: (id: string, engine: EngineId, languages: string[]) =>
     invoke<DictationEntry>("retranscribe_dictation", { id, engine, languages }),
@@ -305,11 +305,11 @@ export const meetingsApi = {
   rename: (id: string, title: string) => invoke<void>("rename_meeting", { id, title }),
   remove: (id: string) => invoke<void>("delete_meeting", { id }),
   reveal: (id: string) => invoke<void>("reveal_meeting", { id }),
-  /** Okno zapisu i eksport ścieżki (albo obu zmiksowanych) do WAV; zwraca ścieżkę pliku, `null` = anulowano. */
+  /** Save dialog and export of a track (or both mixed) to WAV; returns the file path, `null` = cancelled. */
   exportAudio: (id: string, track: AudioExport) => invoke<string | null>("export_meeting_audio", { id, track }),
-  /** Okno wyboru pliku z nagraniem; `null` = anulowano. Wczytanie i transkrypcja idą w tle. */
+  /** File picker for a recording; `null` = cancelled. Loading and transcription run in the background. */
   importFile: () => invoke<Meeting | null>("import_meeting"),
-  /** `languages`: kody języków (puste = model rozpozna sam, kilka = rozmowa mieszana); brak = z ustawień. */
+  /** `languages`: language codes (empty = the model detects them, several = mixed-language conversation); absent = from settings. */
   transcribe: (id: string, engine?: EngineId, languages?: string[]) =>
     invoke<void>("transcribe_meeting", { id, engine: engine ?? null, languages: languages ?? null }),
   summarize: (id: string, provider: ProviderId, model?: string) =>

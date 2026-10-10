@@ -1,5 +1,5 @@
-//! Języki do wyboru przy przepisywaniu spotkania: wszystkie, które zna Whisper (kody jak
-//! w whisper.cpp), z polskimi nazwami. Parakeet v3 i Canary v2 znają tylko `EUROPEAN`.
+//! Languages to choose from when transcribing a meeting: all that Whisper knows (codes as
+//! in whisper.cpp), with Polish names. Parakeet v3 and Canary v2 only know `EUROPEAN`.
 use serde::Serialize;
 
 pub const ALL: &[(&str, &str)] = &[
@@ -105,7 +105,7 @@ pub const ALL: &[(&str, &str)] = &[
     ("it", "włoski"),
 ];
 
-/// Języki Parakeeta v3 i Canary v2.
+/// Languages of Parakeet v3 and Canary v2.
 pub const EUROPEAN: &[&str] = &[
     "bg", "cs", "da", "de", "el", "en", "es", "et", "fi", "fr", "hr", "hu", "it", "lt", "lv", "mt", "nl", "pl", "pt", "ro", "ru", "sk",
     "sl", "sv", "uk",
@@ -119,7 +119,7 @@ pub fn name(code: &str) -> Option<&'static str> {
 pub struct LanguageInfo {
     code: &'static str,
     name: &'static str,
-    /// Obsługiwany też przez Parakeeta i Canary.
+    /// Also supported by Parakeet and Canary.
     european: bool,
 }
 
@@ -141,7 +141,7 @@ mod tests {
         codes.sort();
         codes.dedup();
         assert_eq!(codes.len(), ALL.len());
-        // whisper large-v3 zna 100 języków.
+        // whisper large-v3 knows 100 languages.
         assert_eq!(ALL.len() as i32, whisper_rs::get_lang_max_id() + 1);
         for code in EUROPEAN {
             assert!(name(code).is_some(), "{code}");

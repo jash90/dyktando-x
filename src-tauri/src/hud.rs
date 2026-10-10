@@ -1,5 +1,5 @@
-//! Dymek ze stanem dyktowania: małe, przezroczyste okno zawsze na wierzchu, które nie
-//! przejmuje fokusu (inaczej tekst wkleiłby się do niego, a nie do aplikacji użytkownika).
+//! Bubble with the dictation state: a small, transparent, always-on-top window that doesn't
+//! take focus (otherwise the text would be pasted into it instead of the user's app).
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tauri::{AppHandle, Manager, PhysicalPosition, WebviewUrl, WebviewWindowBuilder};
@@ -10,7 +10,7 @@ pub const LABEL: &str = "hud";
 const WIDTH: f64 = 260.0;
 const HEIGHT: f64 = 64.0;
 
-/// Numer kolejnego stanu — opóźnione chowanie nie może schować dymka nowego nagrania.
+/// Sequence number of the state — a delayed hide must not hide the bubble of a new recording.
 static GENERATION: AtomicU64 = AtomicU64::new(0);
 
 pub fn create(app: &AppHandle) -> tauri::Result<()> {
@@ -59,7 +59,7 @@ pub fn update(app: &AppHandle, state: &HudState) {
         HudState::Info { .. } => Some(Duration::from_secs(4)),
         HudState::Recording { .. } | HudState::Transcribing => None,
     };
-    // Błędy pokazujemy zawsze — inaczej dyktowanie „nic nie robi” bez wyjaśnienia.
+    // Errors are always shown — otherwise dictation "does nothing" with no explanation.
     let visible = enabled || matches!(state, HudState::Error { .. });
     match hide_after {
         Some(d) if d.is_zero() => {

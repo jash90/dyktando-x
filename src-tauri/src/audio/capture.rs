@@ -1,6 +1,6 @@
-//! Przechwytywanie mikrofonu przez cpal (CoreAudio / WASAPI / ALSA-PulseAudio-PipeWire).
-//! Strumień cpal nie jest `Send` na każdej platformie, więc żyje na własnym wątku;
-//! `InputCapture` tylko go zatrzymuje.
+//! Microphone capture via cpal (CoreAudio / WASAPI / ALSA-PulseAudio-PipeWire).
+//! The cpal stream is not `Send` on every platform, so it lives on its own thread;
+//! `InputCapture` only stops it.
 use anyhow::{anyhow, Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, SampleFormat, SizedSample};
@@ -10,7 +10,7 @@ use std::thread::JoinHandle;
 
 use super::resample::downmix;
 
-/// Odbiorca próbek mono w natywnej częstotliwości urządzenia (wołany z wątku audio — krótko!).
+/// Receiver of mono samples at the device's native rate (called from the audio thread — be quick!).
 pub type Sink = Box<dyn FnMut(&[f32]) + Send + 'static>;
 
 pub fn input_device_names() -> Vec<String> {
@@ -45,7 +45,7 @@ pub struct InputCapture {
     thread: Option<JoinHandle<()>>,
     pub sample_rate: u32,
     pub device_name: String,
-    /// Strumień zgłosił błąd (np. urządzenie odłączone) — dalej nic nie przyjdzie.
+    /// The stream reported an error (e.g. device unplugged) — nothing more will arrive.
     failed: Arc<AtomicBool>,
 }
 

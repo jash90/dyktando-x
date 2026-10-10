@@ -1,5 +1,5 @@
-//! Dzielenie ścieżki na wypowiedzi (Silero VAD v4, ramki 32 ms). Prawdopodobieństwa liczymy
-//! strumieniowo po całej ścieżce (stan LSTM ciągły), a fragmenty składa czysta funkcja `segments`.
+//! Splitting a track into utterances (Silero VAD v4, 32 ms frames). Probabilities are computed
+//! as a stream over the whole track (continuous LSTM state), and segments are built by the pure function `segments`.
 use anyhow::{anyhow, Result};
 use ndarray::{Array1, Array2, Array3};
 use ort::inputs;
@@ -10,21 +10,21 @@ use std::path::Path;
 
 use super::writer;
 
-/// Silero v4 przy 16 kHz jest trenowany na oknach 512 próbek. Z oknem 480 (tak robi transcribe-rs)
-/// stan LSTM po minucie nagrania „dryfuje” i model przestaje wykrywać mowę.
+/// Silero v4 at 16 kHz is trained on 512-sample windows. With a 480 window (as transcribe-rs does)
+/// the LSTM state "drifts" after a minute of recording and the model stops detecting speech.
 pub const FRAME: usize = 512;
 pub const FRAME_SECONDS: f64 = FRAME as f64 / 16_000.0;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Params {
     pub threshold: f32,
-    /// Krótsza mowa to szum/kliknięcie.
+    /// Shorter speech is noise/a click.
     pub min_speech: f64,
-    /// Krótsza cisza nie dzieli wypowiedzi.
+    /// Shorter silence doesn't split an utterance.
     pub min_silence: f64,
-    /// Margines dokładany z obu stron (nie ucinamy początku i końca słów).
+    /// Margin added on both sides (we don't cut off the beginning and end of words).
     pub pad: f64,
-    /// Dłuższe fragmenty dzielimy (silniki lepiej radzą sobie z krótszymi; jak w FluidAudio ~14 s).
+    /// Longer segments are split (engines handle shorter ones better; as in FluidAudio ~14 s).
     pub max_segment: f64,
 }
 
@@ -34,7 +34,7 @@ impl Default for Params {
     }
 }
 
-/// Fragmenty mowy (start, koniec) w sekundach z prawdopodobieństw ramek.
+/// Speech segments (start, end) in seconds from frame probabilities.
 pub fn segments(probs: &[f32], p: Params) -> Vec<(f64, f64)> {
     let total = probs.len() as f64 * FRAME_SECONDS;
     let mut raw: Vec<(usize, usize)> = Vec::new();
@@ -65,7 +65,7 @@ pub fn segments(probs: &[f32], p: Params) -> Vec<(f64, f64)> {
         if ((e - s) as f64) * FRAME_SECONDS < p.min_speech {
             continue;
         }
-        // Dzielenie długich fragmentów w najcichszej ramce drugiej połowy okna.
+        // Splitting long segments at the quietest frame in the second half of the window.
         let mut cur = s;
         while e - cur > max_frames {
             let lo = cur + max_frames / 2;
@@ -139,11 +139,11 @@ impl Silero {
     }
 }
 
-/// Po tylu ramkach ciszy z rzędu (~1 s) zerujemy stan — inaczej przy długich nagraniach
-/// (zwłaszcza z bardzo równą ciszą) LSTM się nasyca i kolejne wypowiedzi mają zaniżone wyniki.
+/// After this many consecutive silent frames (~1 s) we reset the state — otherwise on long recordings
+/// (especially with very even silence) the LSTM saturates and later utterances get lowered scores.
 const RESET_AFTER_SILENT_FRAMES: usize = 31;
 
-/// Prawdopodobieństwa mowy dla całej ścieżki. `cancel` sprawdzane co porcję.
+/// Speech probabilities for the whole track. `cancel` is checked every chunk.
 pub fn track_probabilities(model: &Path, dir: &Path, prefix: &str, cancel: &dyn Fn() -> bool) -> Result<Vec<f32>> {
     let mut vad = Silero::load(model)?;
     let mut probs = Vec::new();
@@ -169,7 +169,7 @@ pub fn track_probabilities(model: &Path, dir: &Path, prefix: &str, cancel: &dyn 
     Ok(probs)
 }
 
-/// Przechodzi po ścieżce raz i oddaje próbki każdego fragmentu (fragmenty posortowane).
+/// Goes over the track once and yields the samples of each segment (segments sorted).
 pub fn for_each_segment(dir: &Path, prefix: &str, segs: &[(f64, f64)], mut f: impl FnMut(usize, &[f32]) -> Result<()>) -> Result<()> {
     let to_sample = |t: f64| (t * 16_000.0).round() as u64;
     let mut next = 0usize;
@@ -186,13 +186,13 @@ pub fn for_each_segment(dir: &Path, prefix: &str, segs: &[(f64, f64)], mut f: im
             f(next, &buf[(s - buf_start) as usize..(e - buf_start) as usize])?;
             next += 1;
         }
-        // Zostaw tylko to, czego potrzebują następne fragmenty.
+        // Keep only what the next segments need.
         let keep_from = segs.get(next).map(|x| to_sample(x.0)).unwrap_or(buf_end).clamp(buf_start, buf_end);
         buf.drain(..(keep_from - buf_start) as usize);
         buf_start = keep_from;
         Ok(())
     })?;
-    // Fragmenty sięgające końca ścieżki (zaokrąglenia).
+    // Segments reaching the end of the track (rounding).
     let buf_end = buf_start + buf.len() as u64;
     while next < segs.len() {
         let (s, e) = (to_sample(segs[next].0).clamp(buf_start, buf_end), to_sample(segs[next].1).clamp(buf_start, buf_end));
@@ -230,7 +230,7 @@ mod tests {
     #[test]
     fn long_speech_is_cut_below_max() {
         let mut pr = probs(&[(0.9, 40.0)]);
-        pr[(10.0 / FRAME_SECONDS) as usize] = 0.2; // najcichsze miejsce w drugiej połowie okna
+        pr[(10.0 / FRAME_SECONDS) as usize] = 0.2; // quietest spot in the second half of the window
         let s = segments(&pr, Params::default());
         assert!(s.len() >= 3);
         assert!(s.iter().all(|(a, b)| b - a <= 14.0 + 0.4 + 1e-9), "{s:?}");

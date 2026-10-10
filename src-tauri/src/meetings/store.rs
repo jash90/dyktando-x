@@ -1,5 +1,5 @@
-//! Foldery spotkań: `<dane>/Meetings/<yyyy-MM-dd_HH-mm-ss>/` z `meeting.json`, `audio/`,
-//! `transcript.md|json`, `summaries/`. Ten sam układ co w wersji Swift.
+//! Meeting folders: `<data>/Meetings/<yyyy-MM-dd_HH-mm-ss>/` with `meeting.json`, `audio/`,
+//! `transcript.md|json`, `summaries/`. Same layout as in the Swift version.
 use anyhow::{Context, Result};
 use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
@@ -14,9 +14,9 @@ pub const SYSTEM: &str = "system";
 #[serde(rename_all = "snake_case")]
 pub enum State {
     Recording,
-    /// Wczytywanie pliku audio wskazanego przez użytkownika (import nagrania).
+    /// Loading an audio file chosen by the user (recording import).
     Importing,
-    /// Aplikacja zamknęła się w trakcie nagrywania — pliki zostały.
+    /// The app closed during recording — the files remained.
     Interrupted,
     Recorded,
     Transcribing,
@@ -26,7 +26,7 @@ pub enum State {
     Failed,
 }
 
-/// Przerwa w nagraniu ścieżki (źródło przestało dawać dźwięk), w sekundach od startu.
+/// A gap in a track's recording (the source stopped producing audio), in seconds from the start.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AudioGap {
@@ -53,10 +53,10 @@ pub struct Meeting {
     pub audio_deleted: bool,
     #[serde(default)]
     pub transcript_engine: Option<String>,
-    /// Języki ostatniej transkrypcji (puste = rozpoznane przez silnik); `None` = sprzed tej opcji.
+    /// Languages of the last transcription (empty = detected by the engine); `None` = predates this option.
     #[serde(default)]
     pub transcript_languages: Option<Vec<String>>,
-    /// Przerwy w nagraniu (dźwięk się urwał i trzeba było go wznowić).
+    /// Gaps in the recording (the audio cut off and had to be resumed).
     #[serde(default)]
     pub audio_gaps: Vec<AudioGap>,
     #[serde(default)]
@@ -64,12 +64,12 @@ pub struct Meeting {
 }
 
 impl Meeting {
-    /// Czy da się przepisać (jest audio i nic akurat nie trwa).
+    /// Whether it can be transcribed (there is audio and nothing is currently running).
     pub fn can_transcribe(&self) -> bool {
         !self.audio_deleted && !matches!(self.state, State::Recording | State::Importing | State::Transcribing | State::Summarizing)
     }
 
-    /// Czy pliki audio są właśnie zapisywane (nagrywanie albo wczytywanie importu).
+    /// Whether the audio files are being written right now (recording or loading an import).
     pub fn audio_in_progress(&self) -> bool {
         matches!(self.state, State::Recording | State::Importing)
     }
@@ -156,7 +156,7 @@ impl Store {
         Ok(m)
     }
 
-    /// Wszystkie spotkania, najnowsze pierwsze.
+    /// All meetings, newest first.
     pub fn all(&self) -> Vec<Meeting> {
         let mut v: Vec<Meeting> = std::fs::read_dir(&self.root)
             .map(|it| it.filter_map(|e| e.ok()).filter_map(|e| self.load(e.file_name().to_str()?)).collect())
@@ -173,8 +173,8 @@ impl Store {
         Ok(())
     }
 
-    /// Po starcie aplikacji: spotkania zostawione w `recording` (awaria, wyłączenie prądu)
-    /// → naprawa nagłówków WAV i stan `interrupted`; przerwane przetwarzanie → poprzedni stan.
+    /// After app startup: meetings left in `recording` (crash, power loss) → WAV header repair and
+    /// the `interrupted` state; interrupted processing → the previous state.
     pub fn recover(&self) -> Vec<String> {
         let mut recovered = Vec::new();
         for m in self.all() {
@@ -208,7 +208,7 @@ impl Store {
         recovered
     }
 
-    /// Usuwa audio spotkań starszych niż `days` dni — tylko tych już przepisanych (tekst zostaje).
+    /// Deletes the audio of meetings older than `days` days — only those already transcribed (the text stays).
     pub fn apply_retention(&self, days: u32, now: DateTime<Local>) -> usize {
         if days == 0 {
             return 0;
@@ -233,7 +233,7 @@ impl Store {
             .map(|it| it.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.extension().is_some_and(|e| e == "md")).collect())
             .unwrap_or_default();
         v.sort();
-        v.reverse(); // najnowsze pierwsze (nazwy zaczynają się od daty)
+        v.reverse(); // newest first (names start with the date)
         v
     }
 }

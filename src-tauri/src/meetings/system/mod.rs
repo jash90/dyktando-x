@@ -1,13 +1,13 @@
-//! Dźwięk systemowy (to, co słychać z głośników: rozmówcy w Meet/Zoom/Teams), bez dźwięku
-//! samego Dyktando X:
-//! - macOS 14.4+: Core Audio process tap (uprawnienie „Nagrywanie dźwięku systemowego”),
-//! - Windows 10 20348+/11: WASAPI process loopback z wykluczeniem własnego procesu,
-//! - Linux: monitor domyślnego wyjścia PulseAudio/PipeWire (`parec`).
+//! System audio (what comes out of the speakers: the other participants in Meet/Zoom/Teams),
+//! without the sound of Dyktando X itself:
+//! - macOS 14.4+: Core Audio process tap ("System Audio Recording" permission),
+//! - Windows 10 20348+/11: WASAPI process loopback excluding our own process,
+//! - Linux: monitor of the default PulseAudio/PipeWire output (`parec`).
 use anyhow::Result;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-/// Odbiorca próbek mono f32 w częstotliwości `SystemCapture::sample_rate`.
+/// Receiver of mono f32 samples at `SystemCapture::sample_rate`.
 pub type Sink = Box<dyn FnMut(&[f32]) + Send + 'static>;
 
 #[cfg(target_os = "macos")]
@@ -43,13 +43,13 @@ impl SystemCapture {
         Ok(Self { inner, sample_rate, buffers })
     }
 
-    /// Ile buforów przyszło. 0 po kilku sekundach = przechwytywanie „martwe” (macOS: tap
-    /// utworzony przed zgodą użytkownika) — trzeba je utworzyć od nowa.
+    /// How many buffers have arrived. 0 after a few seconds = "dead" capture (macOS: tap
+    /// created before the user granted permission) — it must be recreated.
     pub fn buffers_received(&self) -> u64 {
         self.buffers.load(Ordering::Relaxed)
     }
 
-    /// Zmieniło się urządzenie, na którym stoi przechwytywanie — trzeba je utworzyć od nowa.
+    /// The device the capture is attached to has changed — it must be recreated.
     pub fn device_changed(&self) -> bool {
         self.inner.device_changed()
     }
@@ -59,11 +59,11 @@ impl SystemCapture {
     }
 }
 
-/// Czy przechwytywanie oddaje bufory także w ciszy. WASAPI loopback w ciszy nie wysyła nic,
-/// więc tam brak buforów nie znaczy, że dźwięk się urwał.
+/// Whether the capture delivers buffers during silence too. WASAPI loopback sends nothing in
+/// silence, so there a lack of buffers doesn't mean the audio was cut off.
 pub const DELIVERS_IN_SILENCE: bool = cfg!(not(target_os = "windows"));
 
-/// Czy system w ogóle obsługuje nagrywanie dźwięku aplikacji (np. macOS < 14.4 — nie).
+/// Whether the system supports recording app audio at all (e.g. macOS < 14.4 — no).
 pub fn availability() -> Result<(), String> {
     platform::availability()
 }
@@ -72,8 +72,8 @@ pub fn availability() -> Result<(), String> {
 mod tests {
     use super::*;
 
-    /// Diagnostyka na prawdziwym sprzęcie: zgłoszona częstotliwość musi się zgadzać z liczbą
-    /// próbek, które naprawdę przychodzą (inaczej nagranie rozmówców jest pocięte ciszą).
+    /// Diagnostics on real hardware: the reported sample rate must match the number of samples
+    /// that actually arrive (otherwise the participants' recording is chopped up by silence).
     /// `cargo test --lib -- --ignored system_rate --nocapture`.
     #[test]
     #[ignore]

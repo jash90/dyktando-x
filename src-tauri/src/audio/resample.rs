@@ -1,5 +1,5 @@
-//! Przeliczanie na 16 kHz mono (odpowiednik `MonoResampler` ze Swifta).
-//! Strumieniowo — do nagrań spotkań bez trzymania całości w RAM — i jednorazowo dla dyktowania.
+//! Conversion to 16 kHz mono (the counterpart of `MonoResampler` in the Swift version).
+//! Streaming — for meeting recordings, without holding it all in RAM — and one-shot for dictation.
 use anyhow::{anyhow, Result};
 use rubato::audioadapter_buffers::direct::InterleavedSlice;
 use rubato::{Fft, FixedSync, Resampler};
@@ -7,7 +7,8 @@ use rubato::{Fft, FixedSync, Resampler};
 pub const TARGET_RATE: u32 = 16_000;
 const CHUNK: usize = 1024;
 
-/// Uśrednia kanały do mono (bez tego zostałby tylko lewy kanał — rozmówca z prawej by zniknął).
+/// Averages channels to mono (otherwise only the left channel would remain — a speaker on the
+/// right would vanish).
 pub fn downmix(interleaved: &[f32], channels: usize) -> Vec<f32> {
     if channels <= 1 {
         return interleaved.to_vec();
@@ -22,7 +23,7 @@ pub struct StreamResampler {
     inner: Option<Fft<f32>>,
     pending: Vec<f32>,
     out_buf: Vec<f32>,
-    /// Ile próbek z początku wyjścia to opóźnienie filtra (wycinamy, żeby ścieżki się zgadzały).
+    /// How many leading output samples are filter delay (we cut them so the tracks line up).
     skip: usize,
 }
 
@@ -38,7 +39,7 @@ impl StreamResampler {
         Ok(Self { inner: Some(r), pending: Vec::with_capacity(CHUNK * 2), out_buf, skip })
     }
 
-    /// Przyjmuje mono w częstotliwości wejściowej, zwraca to, co już przeliczone (16 kHz).
+    /// Takes mono at the input sample rate, returns what has already been converted (16 kHz).
     pub fn push(&mut self, mono: &[f32]) -> Vec<f32> {
         let Some(r) = self.inner.as_mut() else {
             return mono.to_vec();
@@ -71,7 +72,7 @@ impl StreamResampler {
         out
     }
 
-    /// Dopycha resztę ciszą i zwraca ostatnie próbki.
+    /// Flushes the remainder with silence and returns the last samples.
     pub fn flush(&mut self) -> Vec<f32> {
         let Some(r) = self.inner.as_ref() else {
             return Vec::new();
@@ -79,7 +80,7 @@ impl StreamResampler {
         if self.pending.is_empty() {
             return Vec::new();
         }
-        // Reszta wejścia + opóźnienie filtra, które jeszcze siedzi w środku.
+        // Remaining input + the filter delay still held inside.
         let expected = (self.pending.len() as f64 * r.resample_ratio()).round() as usize + r.output_delay();
         let zeros = vec![0.0; r.input_frames_next() * 3];
         let mut out = self.push(&zeros);
@@ -89,7 +90,7 @@ impl StreamResampler {
     }
 }
 
-/// Jednorazowe przeliczenie całego nagrania.
+/// One-shot conversion of the whole recording.
 pub fn to_16k(mono: &[f32], input_rate: u32) -> Result<Vec<f32>> {
     if input_rate == TARGET_RATE {
         return Ok(mono.to_vec());
@@ -130,12 +131,12 @@ mod tests {
     fn preserves_tone_and_energy() {
         let out = to_16k(&sine(48_000, 440.0, 1.0), 48_000).unwrap();
         let reference = sine(16_000, 440.0, 1.0);
-        // Pomijamy brzegi, porównujemy energię środka.
+        // Skip the edges, compare the energy of the middle.
         let rms = |v: &[f32]| (v.iter().map(|x| x * x).sum::<f32>() / v.len() as f32).sqrt();
         let a = rms(&out[2000..14000]);
         let b = rms(&reference[2000..14000]);
         assert!((a - b).abs() < 0.02, "rms {a} vs {b}");
-        // Faza zgodna (opóźnienie filtra wycięte): korelacja bliska 1.
+        // Phase matches (filter delay removed): correlation close to 1.
         let dot: f32 = out[2000..14000].iter().zip(&reference[2000..14000]).map(|(x, y)| x * y).sum();
         let corr = dot / (a * b * 12000.0);
         assert!(corr > 0.95, "korelacja {corr}");

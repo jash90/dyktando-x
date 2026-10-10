@@ -1,5 +1,5 @@
-//! Podpowiedź „Wykryto spotkanie w Zoom — nagrać?”: co 5 s sprawdzamy, które aplikacje do rozmów
-//! używają mikrofonu. Nic nie nagrywa się samo — użytkownik klika „Nagraj”.
+//! The "Meeting detected in Zoom — record?" hint: every 5 s we check which calling apps are
+//! using the microphone. Nothing records on its own — the user clicks "Record".
 use std::collections::BTreeSet;
 
 #[cfg(target_os = "macos")]
@@ -15,9 +15,9 @@ mod linux;
 #[cfg(target_os = "linux")]
 use linux as platform;
 
-/// (identyfikator, nazwa do wyświetlenia). macOS: bundle ID (dopasowanie po prefiksie, bo
-/// przeglądarki używają mikrofonu z procesów pomocniczych `….helper`), Windows: nazwa pliku .exe
-/// albo rodzina pakietu, Linux: nazwa programu z PulseAudio/PipeWire.
+/// (identifier, display name). macOS: bundle ID (prefix match, because browsers use the
+/// microphone from helper processes `….helper`), Windows: .exe file name or package family,
+/// Linux: program name from PulseAudio/PipeWire.
 pub const MEETING_APPS: &[(&str, &str)] = &[
     // macOS
     ("us.zoom.xos", "Zoom"),
@@ -71,7 +71,7 @@ pub const MEETING_APPS: &[(&str, &str)] = &[
     ("webex", "Webex"),
 ];
 
-/// Nazwa aplikacji do rozmów dla identyfikatora procesu albo `None`.
+/// Name of the calling app for a process identifier, or `None`.
 pub fn matching_app(id: &str) -> Option<&'static str> {
     let lower = id.to_lowercase();
     MEETING_APPS.iter().find_map(|(app, name)| {
@@ -80,7 +80,7 @@ pub fn matching_app(id: &str) -> Option<&'static str> {
     })
 }
 
-/// Czysta logika: o którą aplikację zapytać (raz na „sesję” mikrofonu danej aplikacji).
+/// Pure logic: which app to ask about (once per microphone "session" of a given app).
 #[derive(Default)]
 pub struct DetectionLogic {
     handled: BTreeSet<&'static str>,
@@ -89,10 +89,10 @@ pub struct DetectionLogic {
 impl DetectionLogic {
     pub fn update(&mut self, active_ids: &[String], is_recording: bool, enabled: bool) -> Option<&'static str> {
         let active: BTreeSet<&'static str> = active_ids.iter().filter_map(|id| matching_app(id)).collect();
-        // Aplikacja przestała używać mikrofonu → następna rozmowa znów zapyta.
+        // The app stopped using the microphone → the next call will ask again.
         self.handled.retain(|a| active.contains(a));
         if !enabled || is_recording {
-            // Nie pytaj o rozmowę, która już trwa w chwili startu/końca nagrywania.
+            // Don't ask about a call that is already in progress when recording starts/ends.
             self.handled.extend(active);
             return None;
         }
@@ -102,7 +102,7 @@ impl DetectionLogic {
     }
 }
 
-/// Identyfikatory procesów używających teraz mikrofonu (bez Dyktando X).
+/// Identifiers of processes currently using the microphone (excluding Dyktando X).
 pub fn processes_using_microphone() -> Vec<String> {
     platform::processes_using_microphone()
 }
@@ -147,7 +147,7 @@ mod tests {
 
 #[cfg(test)]
 mod live {
-    /// Odczyt z prawdziwego systemu: `cargo test -- --ignored detector_live --nocapture`.
+    /// Reading from the real system: `cargo test -- --ignored detector_live --nocapture`.
     #[test]
     #[ignore]
     fn detector_live() {

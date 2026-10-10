@@ -1,4 +1,4 @@
-//! Nagrywanie spotkań: dwie ścieżki → transkrypcja z mówcami → podsumowanie AI.
+//! Meeting recording: two tracks → transcription with speakers → AI summary.
 pub mod detector;
 pub mod diarize;
 #[cfg(test)]
