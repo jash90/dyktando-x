@@ -1,5 +1,6 @@
 //! Speech recognition engines: Parakeet v3 and Canary v2 (ONNX) via transcribe-rs, Whisper
-//! (whisper.cpp) via `crate::whisper`.
+//! (whisper.cpp) via `crate::whisper`. The vocabulary (`crate::vocabulary`) is applied to the
+//! text of every engine.
 //! Input is always 16 kHz mono f32. An instance is never shared between threads at the same time.
 use anyhow::{anyhow, bail, Result};
 use transcribe_rs::onnx::canary::{CanaryModel, CanaryParams};
@@ -10,11 +11,17 @@ use crate::i18n::{t, t_with};
 use crate::languages;
 use crate::models::EngineId;
 use crate::settings::Language;
+use crate::vocabulary::Vocabulary;
 use crate::whisper::Whisper;
 
 pub const SAMPLE_RATE: u32 = 16_000;
 
-pub enum Engine {
+pub struct Engine {
+    model: Model,
+    vocabulary: Vocabulary,
+}
+
+enum Model {
     Parakeet(ParakeetModel),
     Canary(CanaryModel),
     Whisper(Whisper),
@@ -26,24 +33,27 @@ impl Engine {
         if !asset.is_installed() {
             return Err(anyhow!(t_with("model.not_downloaded", &[("model", &asset.label())])));
         }
-        Ok(match id {
-            EngineId::ParakeetV3 => Engine::Parakeet(
+        let model = match id {
+            EngineId::ParakeetV3 => Model::Parakeet(
                 ParakeetModel::load(&asset.dir_path(), &Quantization::Int8)
                     .map_err(|e| anyhow!(t_with("engine.load_parakeet", &[("error", &e)])))?,
             ),
-            EngineId::CanaryV2 => Engine::Canary(
+            EngineId::CanaryV2 => Model::Canary(
                 CanaryModel::load(&asset.dir_path(), &Quantization::Int8).map_err(|e| anyhow!(t_with("engine.load_canary", &[("error", &e)])))?,
             ),
-            EngineId::WhisperTurbo | EngineId::WhisperLargeV3 => Engine::Whisper(
+            EngineId::WhisperTurbo | EngineId::WhisperLargeV3 => Model::Whisper(
                 Whisper::load(&asset.file_path(0)).map_err(|e| anyhow!(t_with("engine.load_whisper", &[("error", &e)])))?,
             ),
-        })
+        };
+        Ok(Self { model, vocabulary: Vocabulary::default() })
     }
 
-    /// Dictionary of names and terms as a hint for Whisper (Parakeet and Canary don't support it).
+    /// Vocabulary of names and terms (see `Vocabulary::parse`): Whisper gets it as a prompt, and
+    /// the text of every engine is corrected with it.
     pub fn set_vocabulary(&mut self, vocabulary: &str) {
-        if let Engine::Whisper(w) = self {
-            w.set_vocabulary(vocabulary);
+        self.vocabulary = Vocabulary::parse(vocabulary);
+        if let Model::Whisper(w) = &mut self.model {
+            w.set_prompt(&self.vocabulary.prompt());
         }
     }
 
@@ -71,13 +81,13 @@ impl Engine {
     /// Whether the engine can translate to `target` (Canary: between English and the rest of its
     /// languages; Whisper: only to English; Parakeet: not at all).
     pub fn can_translate(&self, language: Language, target: &str) -> bool {
-        match self {
-            Engine::Canary(_) => {
+        match self.model {
+            Model::Canary(_) => {
                 let source = language.code().unwrap_or("pl");
                 source != target && (source == "en" || target == "en")
             }
-            Engine::Whisper(_) => target == "en" && language.code() != Some("en"),
-            Engine::Parakeet(_) => false,
+            Model::Whisper(_) => target == "en" && language.code() != Some("en"),
+            Model::Parakeet(_) => false,
         }
     }
 
@@ -105,8 +115,8 @@ impl Engine {
         if samples.len() < (SAMPLE_RATE as usize) / 10 {
             return Ok(String::new());
         }
-        let text = match self {
-            Engine::Parakeet(m) => {
+        let text = match &mut self.model {
+            Model::Parakeet(m) => {
                 // transcribe_with pads 250 ms of silence at the start itself; we pad the end,
                 // so the last word isn't cut off when the key is released quickly.
                 let mut padded = samples.to_vec();
@@ -121,7 +131,7 @@ impl Engine {
                 .map_err(|e| anyhow!("Parakeet: {e}"))?
                 .text
             }
-            Engine::Canary(m) => {
+            Model::Canary(m) => {
                 // Canary doesn't detect the language itself — "automatic" is treated as Polish.
                 let source = match languages {
                     [] => "pl",
@@ -135,7 +145,7 @@ impl Engine {
                 };
                 m.transcribe_with(samples, &params).map_err(|e| anyhow!("Canary: {e}"))?.text
             }
-            Engine::Whisper(w) => {
+            Model::Whisper(w) => {
                 let language = match languages {
                     [] => None,
                     [one] => Some(*one),
@@ -144,6 +154,8 @@ impl Engine {
                 w.transcribe(samples, language, target == Some("en")).map_err(|e| anyhow!("Whisper: {e}"))?
             }
         };
+        // A translation is in another language: the vocabulary's replacements don't apply to it.
+        let text = if target.is_none() { self.vocabulary.correct(text.trim()) } else { text };
         Ok(text.trim().to_string())
     }
 }
@@ -257,11 +269,11 @@ mod tests {
     #[ignore]
     fn whisper_turbo_picks_the_language_among_chosen() {
         ensure(EngineId::WhisperTurbo.asset());
-        let Engine::Whisper(mut w) = Engine::load(EngineId::WhisperTurbo).unwrap() else { unreachable!() };
+        let Model::Whisper(mut w) = Engine::load(EngineId::WhisperTurbo).unwrap().model else { unreachable!() };
         let (pl, en) = (fixture(), fixture_named("en_samantha.wav"));
         assert_eq!(w.detect_language(&pl, &["en", "pl"]).unwrap(), "pl");
         assert_eq!(w.detect_language(&en, &["pl", "en"]).unwrap(), "en");
-        let mut e = Engine::Whisper(w);
+        let mut e = Engine { model: Model::Whisper(w), vocabulary: Vocabulary::default() };
         let text = e.transcribe_in(&en, &["pl", "en"]).unwrap();
         println!("en: {text}");
         let got = words(&text);

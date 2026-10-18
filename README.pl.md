@@ -43,7 +43,10 @@ Tauri 2 + Rust + React/TypeScript.
 - **Historia dyktowania:** każde dyktowanie (tekst i nagranie) jest przechowywane lokalnie
   w zakładce „Dyktowania” okna spotkań, gdzie można je skopiować, pobrać albo przetranskrybować
   innym modelem lub w innym języku.
-- **Słownik:** nazwy i terminy, które Whisper ma pisać poprawnie (ustawienia → Spotkania).
+- **Słownik:** nazwy i terminy w pisowni, jakiej oczekujesz (ustawienia → Spotkania). Poprawia tekst
+  z każdego modelu, także w odmianie („klaudiuszem” → „Klaudiuszem”) i rozbite na kawałki nazwy
+  („hi sense” → „Hisense”); Whisper dostaje listę dodatkowo jako podpowiedź przy rozpoznawaniu.
+  Stałe zamiany zapisuje się jako `cloud kod -> Claude Code`.
 - **Importowane nagrania:** „Importuj nagranie” zamienia plik audio z rozmową (MP3, M4A/AAC, WAV,
   FLAC, OGG Vorbis/Opus, AIFF, CAF) w spotkanie: plik jest dekodowany lokalnie, transkrybowany
   z podpisami mówców („Rozmówca 1”, „Rozmówca 2”…) i, jeśli włączone, podsumowywany.

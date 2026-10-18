@@ -43,7 +43,10 @@ Tauri 2 + Rust + React/TypeScript.
 - **Dictation history:** every dictation (text and recording) is kept locally in the "Dyktowania"
   tab of the meetings window, where it can be copied, downloaded or re-transcribed with another
   model or language.
-- **Vocabulary:** names and terms that Whisper should spell correctly (settings → Spotkania).
+- **Vocabulary:** names and terms spelled the way you want them (settings → Spotkania). Every model's
+  text is corrected with it, including Polish forms ("klaudiuszem" → "Klaudiuszem") and names split
+  into pieces ("hi sense" → "Hisense"); Whisper also gets the list as a hint while recognizing. Fixed
+  replacements are written as `cloud kod -> Claude Code`.
 - **Imported recordings:** "Importuj nagranie" turns an audio file of a conversation (MP3, M4A/AAC,
   WAV, FLAC, OGG Vorbis/Opus, AIFF, CAF) into a meeting: the file is decoded locally, transcribed
   with speaker labels ("Rozmówca 1", "Rozmówca 2"…) and, if enabled, summarized.

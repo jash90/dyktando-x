@@ -11,7 +11,7 @@ pub struct Whisper {
     // Order matters: the state is dropped before the context.
     state: WhisperState,
     _context: WhisperContext,
-    /// Initial prompt (dictionary of names and terms) — Whisper then spells them right more often.
+    /// Initial prompt (the vocabulary's names and terms) — Whisper then spells them right more often.
     prompt: Option<String>,
 }
 
@@ -52,9 +52,9 @@ impl Whisper {
         Ok(Self { state, _context: context, prompt: None })
     }
 
-    /// Dictionary of names and terms (e.g. "NPaw, Hisense, Tizen, CI/CD"); empty = no prompt.
-    pub fn set_vocabulary(&mut self, vocabulary: &str) {
-        let v = vocabulary.split_whitespace().collect::<Vec<_>>().join(" ");
+    /// Names and terms (e.g. "NPaw, Hisense, Tizen, CI/CD"); empty = no prompt.
+    pub fn set_prompt(&mut self, prompt: &str) {
+        let v = prompt.split_whitespace().collect::<Vec<_>>().join(" ");
         self.prompt = (!v.is_empty()).then(|| v.chars().take(MAX_PROMPT_CHARS).collect());
     }
 

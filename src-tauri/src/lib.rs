@@ -20,6 +20,7 @@ mod postprocess;
 mod settings;
 mod tray;
 mod updater;
+mod vocabulary;
 mod whisper;
 
 use serde::Serialize;
