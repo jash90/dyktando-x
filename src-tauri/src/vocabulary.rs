@@ -14,6 +14,13 @@ const MAX_WINDOW: usize = 4;
 /// "Claude-'a"). Only these: "kubek" is not a form of "Kuba".
 const ENDINGS: [&str; 18] = ["", "a", "e", "i", "o", "u", "y", "ą", "ę", "em", "om", "ie", "owi", "ach", "ami", "ów", "ego", "emu"];
 const ARROWS: [&str; 3] = ["->", "=>", "→"];
+/// Short Polish words that are never a piece of a name split by the engine ("to masz" is not
+/// "Tomasz", "do roty" is not "Dorota"); one letter never is either ("o lek" is not "Olek").
+const FUNCTION_WORDS: &[&str] = &[
+    "to", "do", "na", "po", "za", "od", "ze", "we", "co", "ja", "no", "ty", "on", "my", "wy", "mi", "ci", "go", "je", "ma",
+    "by", "bo", "że", "aż", "ku", "ta", "te", "tu", "nie", "tak", "jak", "się", "ale", "czy", "już", "też", "tam", "ten",
+    "tym", "pod", "nad", "dla", "bez", "ani", "lub", "oto",
+];
 
 #[derive(Default, Clone)]
 pub struct Vocabulary {
@@ -116,9 +123,8 @@ impl Vocabulary {
             let sizes = term.words.saturating_sub(1).max(1)..=(term.words + 1).min(MAX_WINDOW);
             for n in sizes {
                 let Some(words) = window(text, tokens, i, n) else { break };
-                // A name split into pieces ("hi sense") has no one-letter piece; a one-letter
-                // word next to another is Polish ("o lek" is not "Olek", "a dam" is not "Adam").
-                if n > term.words && words.iter().any(|w| w.chars().count() < 2) {
+                // A name split into pieces ("hi sense") has no Polish function word among them.
+                if n > term.words && words.iter().any(|w| w.chars().count() < 2 || FUNCTION_WORDS.contains(&lower(w).as_str())) {
                     continue;
                 }
                 let Some((edits, replacement)) = term.matches(&words) else { continue };
@@ -147,8 +153,10 @@ impl Term {
                 }
             }
         }
+        // A key folded below the minimum ("Otto" → "oto") only matches through `inflect`: "oto" is a
+        // Polish word.
         let key = fold(&words.join(" "));
-        if key.first() != self.key.first() {
+        if self.key.len() < MIN_TERM_CHARS || key.first() != self.key.first() {
             return None;
         }
         let edits = levenshtein(&key, &self.key);
@@ -322,6 +330,12 @@ mod tests {
         assert_eq!(fix("Kasia, Ania, Kuba", "kasa, ani kubek"), "kasa, ani kubek");
         // One-letter Polish words are not pieces of a name.
         assert_eq!(fix("Olek, Adam, Alek", "pytałem o lek, a dam ci znać, a lek nie działa"), "pytałem o lek, a dam ci znać, a lek nie działa");
+        // …nor are short ones.
+        assert_eq!(fix(v, "no to masz rację"), "no to masz rację");
+        assert_eq!(fix("Dorota", "wrócił do roty"), "wrócił do roty");
+        // A name that folds to a short key matches its own forms only.
+        assert_eq!(fix("Otto, Anna", "oto dlaczego ana"), "oto dlaczego ana");
+        assert_eq!(fix("Otto", "otto i otta"), "Otto i Otta");
         // A match doesn't cross punctuation.
         assert_eq!(fix(v, "apple, tv"), "apple, tv");
         assert_eq!(fix("", "bez słownika"), "bez słownika");
