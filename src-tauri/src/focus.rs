@@ -83,6 +83,11 @@ pub fn field_text() -> Option<FieldText> {
     platform::field_text()
 }
 
+/// Texts shown in the focused window (macOS only; None elsewhere).
+pub fn window_text() -> Option<String> {
+    platform::window_text()
+}
+
 pub fn should_paste() -> bool {
     let s = snapshot();
     let f = classify(&s);
@@ -97,6 +102,10 @@ mod platform {
     }
 
     pub fn field_text() -> Option<super::FieldText> {
+        None
+    }
+
+    pub fn window_text() -> Option<String> {
         None
     }
 }
@@ -150,5 +159,6 @@ mod live {
         let s = super::snapshot();
         println!("{s:?} → {:?}", super::classify(&s));
         println!("{:?}", super::field_text());
+        println!("{:?}", super::window_text().map(|t| crate::vocabulary::names_in(&t, 60)));
     }
 }

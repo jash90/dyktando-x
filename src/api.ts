@@ -25,6 +25,8 @@ export interface Settings {
   dictation_history: boolean;
   /** Read the focused field's text around the cursor (macOS) — a hint for Whisper, joining the sentence. */
   dictation_context: boolean;
+  /** Read names shown in the focused window (macOS) — a temporary vocabulary for one dictation. */
+  dictation_window_context: boolean;
   /** Model for transcription after recording and for imports. */
   meeting_engine: EngineId;
   /** Live transcription model. */

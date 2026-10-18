@@ -20,6 +20,8 @@ use crate::AppState;
 
 /// A shorter recording is an accidental key brush.
 const MIN_SECONDS: f32 = 0.3;
+/// Names from the focused window passed to the engine (the most frequent).
+const MAX_WINDOW_NAMES: usize = 60;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "phase", rename_all = "snake_case")]
@@ -33,10 +35,27 @@ pub enum HudState {
     Info { message: String },
 }
 
+/// What the focused app shows, read while recording (it still has focus then).
+#[derive(Default)]
+struct Context {
+    field: Option<FieldText>,
+    /// Names and terms from the focused window (see `vocabulary::names_in`).
+    names: Vec<String>,
+}
+
+impl Context {
+    fn read(field: bool, window: bool) -> Self {
+        let names = window.then(crate::focus::window_text).flatten();
+        Self {
+            field: field.then(crate::focus::field_text).flatten(),
+            names: names.map(|t| crate::vocabulary::names_in(&t, MAX_WINDOW_NAMES)).unwrap_or_default(),
+        }
+    }
+}
+
 enum Phase {
     Idle,
-    /// `field`: the focused field's text, read while recording (the app still has focus).
-    Recording { capture: InputCapture, buffer: Arc<Mutex<Vec<f32>>>, started: Instant, field: Option<JoinHandle<Option<FieldText>>> },
+    Recording { capture: InputCapture, buffer: Arc<Mutex<Vec<f32>>>, started: Instant, context: Option<JoinHandle<Context>> },
     Transcribing,
 }
 
@@ -119,8 +138,9 @@ impl Dictation {
             Ok(capture) => {
                 log::info!("Recording: {} @ {} Hz", capture.device_name, capture.sample_rate);
                 let started = Instant::now();
-                let field = settings.dictation_context.then(|| std::thread::spawn(crate::focus::field_text));
-                *phase = Phase::Recording { capture, buffer, started, field };
+                let (field, window) = (settings.dictation_context, settings.dictation_window_context);
+                let context = (field || window).then(|| std::thread::spawn(move || Context::read(field, window)));
+                *phase = Phase::Recording { capture, buffer, started, context };
                 self.recording.store(true, Ordering::Relaxed);
                 emit(app, HudState::Recording { level: 0.0, seconds: 0.0 });
                 self.spawn_level_ticker(app.clone(), started);
@@ -152,7 +172,7 @@ impl Dictation {
     /// Ends the recording; `cancel` discards it without transcription.
     pub fn stop(&self, app: &AppHandle, settings: Settings, cancel: bool) {
         let mut phase = self.phase.lock().unwrap();
-        let Phase::Recording { capture, buffer, started, field } = std::mem::replace(&mut *phase, Phase::Idle) else {
+        let Phase::Recording { capture, buffer, started, context } = std::mem::replace(&mut *phase, Phase::Idle) else {
             return;
         };
         self.recording.store(false, Ordering::Relaxed);
@@ -172,10 +192,14 @@ impl Dictation {
         let engine = self.engine.clone();
         let created_at = chrono::Local::now();
         std::thread::spawn(move || {
-            let field = field.and_then(|h| h.join().ok().flatten());
+            let Context { field, names } = context.and_then(|h| h.join().ok()).unwrap_or_default();
+            if !names.is_empty() {
+                // Only the count: the names are other people's content (chats, mail).
+                log::info!("Names from the window: {}", names.len());
+            }
             let state = app.state::<AppState>();
             let previous = state.dictation.last_pasted.lock().unwrap().take();
-            let result = transcribe_and_insert(&engine, &samples, rate, &settings, field.as_ref());
+            let result = transcribe_and_insert(&engine, &samples, rate, &settings, field.as_ref(), &names);
             *state.dictation.phase.lock().unwrap() = Phase::Idle;
             if let (Some((text, at)), Some(field), true) = (previous, field.as_ref(), settings.vocabulary_learning) {
                 if at.elapsed() < LEARN_WITHIN {
@@ -264,6 +288,7 @@ fn transcribe_and_insert(
     rate: u32,
     settings: &Settings,
     field: Option<&FieldText>,
+    window_names: &[String],
 ) -> Result<Option<Done>> {
     if audio::is_digital_silence(samples) {
         return Err(anyhow!(crate::i18n::t("dictation.digital_silence")));
@@ -283,6 +308,7 @@ fn transcribe_and_insert(
         }
         let (_, e) = guard.as_mut().expect("engine loaded");
         e.set_vocabulary(&settings.vocabulary);
+        e.set_window_names(window_names);
         e.set_context(field.map(|f| f.before.as_str()));
         let raw = e.transcribe(&audio16, settings.language)?;
         // Joined with the field only when the text goes into it.

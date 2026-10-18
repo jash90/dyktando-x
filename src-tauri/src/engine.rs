@@ -19,6 +19,8 @@ pub const SAMPLE_RATE: u32 = 16_000;
 pub struct Engine {
     model: Model,
     vocabulary: Vocabulary,
+    /// `vocabulary` with names from the focused window (one dictation), or just `vocabulary`.
+    active: Vocabulary,
 }
 
 enum Model {
@@ -45,15 +47,22 @@ impl Engine {
                 Whisper::load(&asset.file_path(0)).map_err(|e| anyhow!(t_with("engine.load_whisper", &[("error", &e)])))?,
             ),
         };
-        Ok(Self { model, vocabulary: Vocabulary::default() })
+        Ok(Self { model, vocabulary: Vocabulary::default(), active: Vocabulary::default() })
     }
 
     /// Vocabulary of names and terms (see `Vocabulary::parse`): Whisper gets it as a prompt, and
     /// the text of every engine is corrected with it.
     pub fn set_vocabulary(&mut self, vocabulary: &str) {
         self.vocabulary = Vocabulary::parse(vocabulary);
+        self.set_window_names(&[]);
+    }
+
+    /// Names from the focused window for the next transcriptions (weak terms, see
+    /// `Vocabulary::with_context`); empty = none. Call after `set_vocabulary`.
+    pub fn set_window_names(&mut self, names: &[String]) {
+        self.active = self.vocabulary.with_context(names);
         if let Model::Whisper(w) = &mut self.model {
-            w.set_prompt(&self.vocabulary.prompt());
+            w.set_prompt(&self.active.prompt());
         }
     }
 
@@ -72,7 +81,7 @@ impl Engine {
 
     /// Whether the vocabulary has this term (spelled exactly so).
     pub fn has_term(&self, word: &str) -> bool {
-        self.vocabulary.has_term(word)
+        self.active.has_term(word)
     }
 
     /// Whether the model can transcribe these languages (whisper.cpp codes; empty = detects the language
@@ -173,7 +182,7 @@ impl Engine {
             }
         };
         // A translation is in another language: the vocabulary's replacements don't apply to it.
-        let text = if target.is_none() { self.vocabulary.correct(text.trim()) } else { text };
+        let text = if target.is_none() { self.active.correct(text.trim()) } else { text };
         Ok(text.trim().to_string())
     }
 }
@@ -291,7 +300,7 @@ mod tests {
         let (pl, en) = (fixture(), fixture_named("en_samantha.wav"));
         assert_eq!(w.detect_language(&pl, &["en", "pl"]).unwrap(), "pl");
         assert_eq!(w.detect_language(&en, &["pl", "en"]).unwrap(), "en");
-        let mut e = Engine { model: Model::Whisper(w), vocabulary: Vocabulary::default() };
+        let mut e = Engine { model: Model::Whisper(w), vocabulary: Vocabulary::default(), active: Vocabulary::default() };
         let text = e.transcribe_in(&en, &["pl", "en"]).unwrap();
         println!("en: {text}");
         let got = words(&text);
