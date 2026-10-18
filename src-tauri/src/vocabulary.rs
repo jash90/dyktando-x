@@ -55,6 +55,9 @@ impl Vocabulary {
                 v.add_term(&item);
             }
         }
+        // The longest replacement wins regardless of the order of the entries: "cloud kod" before
+        // "cloud".
+        v.replacements.sort_by_key(|r| std::cmp::Reverse(r.from.len()));
         v
     }
 
@@ -109,10 +112,15 @@ impl Vocabulary {
         // (edits, tokens) — fewer edits first, then fewer words: "apple tv w" folds to "Apple TV"
         // too ("tww" → "tw"), but the "w" isn't part of the name.
         let mut best: Option<((usize, usize), usize, String)> = None;
-        for term in self.terms.iter().filter(|t| t.key.len() >= MIN_TERM_CHARS) {
+        for term in self.terms.iter().filter(|t| t.letters() >= MIN_TERM_CHARS) {
             let sizes = term.words.saturating_sub(1).max(1)..=(term.words + 1).min(MAX_WINDOW);
             for n in sizes {
                 let Some(words) = window(text, tokens, i, n) else { break };
+                // A name split into pieces ("hi sense") has no one-letter piece; a one-letter
+                // word next to another is Polish ("o lek" is not "Olek", "a dam" is not "Adam").
+                if n > term.words && words.iter().any(|w| w.chars().count() < 2) {
+                    continue;
+                }
                 let Some((edits, replacement)) = term.matches(&words) else { continue };
                 let rank = (edits, n);
                 if best.as_ref().is_none_or(|(b, _, _)| rank < *b) {
@@ -125,6 +133,11 @@ impl Vocabulary {
 }
 
 impl Term {
+    /// Letters and digits of the term (not of `key`, which collapses "Anna" to "ana").
+    fn letters(&self) -> usize {
+        self.lower.iter().filter(|c| c.is_alphanumeric()).count()
+    }
+
     /// The number of edits and the spelling to use, when `words` is this term.
     fn matches(&self, words: &[&str]) -> Option<(usize, String)> {
         if let [word] = words {
@@ -288,12 +301,16 @@ mod tests {
         assert_eq!(fix(v, "nie ma tomasza"), "nie ma Tomasza");
         assert_eq!(fix(v, "na hisensie"), "na Hisensie");
         assert_eq!(fix("Claude", "zapytaj claude'a"), "zapytaj Claude'a");
+        // Double letters don't make a name too short ("Anna" folds to "ana").
+        assert_eq!(fix("Anna, Otto", "rozmawiałem z anną i otto"), "rozmawiałem z Anną i Otto");
     }
 
     #[test]
     fn explicit_replacements() {
         let v = "cloud kod -> Claude Code, jira => Jira";
         assert_eq!(fix(v, "otworzyłem Cloud Kod, potem jirę i jira."), "otworzyłem Claude Code, potem Jirę i Jira.");
+        // The longest replacement wins, whatever the order of the entries.
+        assert_eq!(fix("cloud -> Claude, cloud kod -> Claude Code", "otworzyłem cloud kod i cloud"), "otworzyłem Claude Code i Claude");
     }
 
     #[test]
@@ -303,6 +320,8 @@ mod tests {
         assert_eq!(fix(v, "to jest zwykłe zdanie o tym"), "to jest zwykłe zdanie o tym");
         assert_eq!(fix(v, "romasz i tomek"), "romasz i tomek");
         assert_eq!(fix("Kasia, Ania, Kuba", "kasa, ani kubek"), "kasa, ani kubek");
+        // One-letter Polish words are not pieces of a name.
+        assert_eq!(fix("Olek, Adam, Alek", "pytałem o lek, a dam ci znać, a lek nie działa"), "pytałem o lek, a dam ci znać, a lek nie działa");
         // A match doesn't cross punctuation.
         assert_eq!(fix(v, "apple, tv"), "apple, tv");
         assert_eq!(fix("", "bez słownika"), "bez słownika");
