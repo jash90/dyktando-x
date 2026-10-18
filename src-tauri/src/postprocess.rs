@@ -105,6 +105,12 @@ fn lowercase_first(text: &str, keep: impl Fn(&str) -> bool) -> String {
     format!("{}{}{}", &text[..at], first.to_lowercase(), &text[at + first.len_utf8()..])
 }
 
+/// For `join`'s `keep` with a model that saw the context (Whisper): whether the model itself wrote
+/// the first word so — `apply` capitalizes it anyway, so only the raw text tells.
+pub fn written_so(raw: &str) -> impl Fn(&str) -> bool + '_ {
+    move |word| raw.trim_start().trim_start_matches(|c: char| !c.is_alphanumeric()).starts_with(word)
+}
+
 /// Like `apply`, joined with what's already in the field (see `join`).
 pub fn apply_in(raw: &str, around: &Around, keep: impl Fn(&str) -> bool) -> String {
     join(&apply(raw), around, keep)
@@ -125,14 +131,16 @@ pub fn join(text: &str, around: &Around, keep: impl Fn(&str) -> bool) -> String 
         if let Some(t) = text.strip_suffix('.').filter(|t| !t.ends_with('.')) {
             text = t.to_string();
         }
-    } else if next.is_some_and(char::is_uppercase) && !text.ends_with(['.', '!', '?', '…', ':']) {
+    } else if next.is_some_and(char::is_uppercase) && !mid_sentence(around.before) && !text.ends_with(['.', '!', '?', '…', ':']) {
+        // A capital after the cursor starts the next sentence — unless this one is in the middle of
+        // a sentence: then it's a name or "I" ("Wczoraj | Kasia przyszła").
         text.push('.');
     }
     if mid_sentence(around.before) {
         text = lowercase_first(&text, keep);
     }
     let opening = "([{„\"'«/-";
-    if around.before.chars().last().is_some_and(|c| !c.is_whitespace() && !opening.contains(c)) && text.starts_with(char::is_alphanumeric) {
+    if around.before.chars().last().is_some_and(|c| !c.is_whitespace() && !opening.contains(c)) && text.starts_with(|c: char| c.is_alphanumeric() || "([{„\"«".contains(c)) {
         text.insert(0, ' ');
     }
     if around.after.starts_with(char::is_alphanumeric) {
@@ -201,13 +209,18 @@ mod tests {
         assert_eq!(joined("Nowe zdanie", "Raport. ", "Następne zdanie."), "Nowe zdanie. ");
         assert_eq!(joined("Nowe zdanie", "Raport. ", " Następne zdanie."), "Nowe zdanie.");
         assert_eq!(joined("Nowe zdanie tutaj teraz i jutro", "Koniec.", "\nDruga linia"), " Nowe zdanie tutaj teraz i jutro.");
+        // In the middle of a sentence a capital after the cursor is a name, not the next sentence.
+        assert_eq!(joined("po pracy", "Wczoraj ", "Kasia przyszła."), "po pracy ");
         // Text on the next line doesn't continue this sentence, whatever its case.
         assert_eq!(joined("Nowe zdanie tutaj teraz i jutro", "Koniec.", "\nponiżej lista"), " Nowe zdanie tutaj teraz i jutro.");
     }
 
     #[test]
     fn a_model_that_saw_the_context_keeps_its_case() {
-        assert_eq!(apply_in("Tomek przyjdzie", &Around { before: "Jutro", after: "" }, |_| true), " Tomek przyjdzie");
+        let around = Around { before: "Spotkanie mamy", after: "" };
+        assert_eq!(apply_in("Tomek przyjdzie", &around, written_so("Tomek przyjdzie")), " Tomek przyjdzie");
+        assert_eq!(apply_in("jutro rano", &around, written_so("jutro rano")), " jutro rano");
+        assert_eq!(apply_in("„Jutro rano", &around, written_so("„Jutro rano")), " „Jutro rano");
     }
 
     #[test]
