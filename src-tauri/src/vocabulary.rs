@@ -242,7 +242,7 @@ fn lower(s: &str) -> String {
 
 /// Letters only, lowercase, without diacritics, with spellings of the same sound unified
 /// ("Tyzeń" ~ "tizen", "Philips" ~ "filips"), double letters collapsed.
-fn fold(s: &str) -> Vec<char> {
+pub(crate) fn fold(s: &str) -> Vec<char> {
     let mut plain = String::with_capacity(s.len());
     for c in s.chars().flat_map(char::to_lowercase) {
         plain.push(match c {
@@ -269,7 +269,7 @@ fn fold(s: &str) -> Vec<char> {
     out
 }
 
-fn levenshtein(a: &[char], b: &[char]) -> usize {
+pub(crate) fn levenshtein(a: &[char], b: &[char]) -> usize {
     let mut prev: Vec<usize> = (0..=b.len()).collect();
     for (i, ca) in a.iter().enumerate() {
         let mut cur = vec![i + 1; b.len() + 1];

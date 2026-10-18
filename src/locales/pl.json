@@ -195,6 +195,8 @@
   "meetings_settings.translate_to": "Tłumacz na żywo na",
   "meetings_settings.vocabulary": "Słownik nazw",
   "meetings_settings.vocabulary_hint": "Nazwy, terminy i imiona, które padają w rozmowach i dyktowaniu — wpisz je po przecinku, w takiej pisowni, jakiej oczekujesz. Każdy model zapisze je wtedy tak samo, także w odmianie (Klaudiusz → Klaudiuszem); Whisper dostaje je dodatkowo jako podpowiedź przy rozpoznawaniu. Stała zamiana: „cloud kod -> Claude Code”.",
+  "meetings_settings.vocabulary_learning": "Ucz się słownika z moich poprawek",
+  "meetings_settings.vocabulary_learning_hint": "Gdy po wklejeniu poprawisz w tekście nazwę albo termin (np. „en paw” na „NPaw”), przy następnym dyktowaniu w tym polu Dyktando X dopisze go do słownika i pokaże to w dymku. Zwykłe zmiany słów nie są zapamiętywane. Wymaga „Uwzględniaj tekst wokół kursora” (macOS).",
   "meetings_settings.vocabulary_placeholder": "np. NPaw, Hisense, Tizen, CI/CD, Apple TV, Klaudiusz, Borys, cloud kod -> Claude Code",
   "meetings_settings.windows_hint": "Dźwięk aplikacji wymaga Windows 11 albo Windows 10 (kompilacja 20348+).",
   "models.badge_dictation": "dyktowanie",

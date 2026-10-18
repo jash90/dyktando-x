@@ -40,6 +40,17 @@ export default function MeetingsPane({ settings, update, env }: PaneProps) {
         />
         <p className="hint">{t("meetings_settings.vocabulary_hint")}</p>
       </div>
+      <div className="row check">
+        <label>
+          <input
+            type="checkbox"
+            checked={settings.vocabulary_learning}
+            onChange={(e) => update({ vocabulary_learning: e.target.checked })}
+          />
+          {t("meetings_settings.vocabulary_learning")}
+        </label>
+        <p className="hint">{t("meetings_settings.vocabulary_learning_hint")}</p>
+      </div>
       <div className="row">
         <label>{t("meetings_settings.language")}</label>
         <select value={settings.meeting_language} onChange={(e) => update({ meeting_language: e.target.value as Language })}>

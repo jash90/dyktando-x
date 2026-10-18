@@ -13,6 +13,7 @@
   "window.live": "Dyktando X — na żywo",
   "hud.consent_reminder": "Nagrywam spotkanie — pamiętaj, żeby poinformować rozmówców.",
   "hud.meeting_saved": "Nagranie zapisane ({duration})",
+  "hud.vocabulary_learned": "Dodano do słownika: {words}",
   "dictation.download_model_first": "Najpierw pobierz model {model} w Ustawieniach",
   "dictation.digital_silence": "Mikrofon nagrał cyfrową ciszę — system nie dał dostępu do mikrofonu. Sprawdź uprawnienia w ustawieniach prywatności.",
   "dictation.nothing_recognized": "Model nic nie rozpoznał — poprzedni tekst zostaje",

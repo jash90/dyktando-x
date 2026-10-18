@@ -13,6 +13,7 @@
   "window.live": "Dyktando X — live",
   "hud.consent_reminder": "Recording the meeting — remember to let the other participants know.",
   "hud.meeting_saved": "Recording saved ({duration})",
+  "hud.vocabulary_learned": "Added to the vocabulary: {words}",
   "dictation.download_model_first": "Download the {model} model in Settings first",
   "dictation.digital_silence": "The microphone recorded digital silence — the system didn't grant microphone access. Check the permissions in the privacy settings.",
   "dictation.nothing_recognized": "The model recognized nothing — the previous text stays",
