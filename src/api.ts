@@ -27,6 +27,8 @@ export interface Settings {
   dictation_context: boolean;
   /** Read names shown in the focused window (macOS) — a temporary vocabulary for one dictation. */
   dictation_window_context: boolean;
+  /** Send the dictated text to the AI provider to fix misrecognized words (off by default). */
+  dictation_polish: boolean;
   /** Model for transcription after recording and for imports. */
   meeting_engine: EngineId;
   /** Live transcription model. */

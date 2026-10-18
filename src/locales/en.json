@@ -52,6 +52,8 @@
   "dictation.paste_mode.auto": "Paste when a text field has focus",
   "dictation.paste_mode.clipboard_only": "Copy to clipboard only",
   "dictation.paste_mode_hint": "After pasting, the previous clipboard contents (text) are restored.",
+  "dictation.polish": "Fix recognized words with AI",
+  "dictation.polish_hint": "The dictated text (with the vocabulary and a piece of the text before the cursor) goes to the provider chosen in the AI tab, which fixes misrecognized names and words without rewording. The recording stays on this computer. Pick a fast model: dictation waits up to 8 s for the answer, and on an error, a missing key or an answer that is not a correction, the local text is pasted.",
   "dictation.title": "Dictation",
   "dictation.window_context": "Suggest names shown in the window",
   "dictation.window_context_hint": "macOS only. For one dictation, names and terms shown in the active window (e.g. \"GitHub\", \"Hisense\", names in a chat) work like the vocabulary: Whisper gets them as a hint, and every model fixes their case and diacritics. The window is read locally and nothing is saved.",

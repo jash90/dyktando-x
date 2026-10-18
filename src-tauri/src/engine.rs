@@ -79,9 +79,9 @@ impl Engine {
         matches!(self.model, Model::Whisper(_))
     }
 
-    /// Whether the vocabulary has this term (spelled exactly so).
-    pub fn has_term(&self, word: &str) -> bool {
-        self.active.has_term(word)
+    /// The terms in use (the vocabulary and the window's names), as `Vocabulary::prompt`.
+    pub fn terms(&self) -> String {
+        self.active.prompt()
     }
 
     /// Whether the model can transcribe these languages (whisper.cpp codes; empty = detects the language

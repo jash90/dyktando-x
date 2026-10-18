@@ -124,6 +124,7 @@
   "ai.error.empty_anthropic": "Pusta odpowiedź modelu (stop_reason: {reason})",
   "ai.error.refused": "Model odmówił odpowiedzi",
   "ai.error.refused_category": "Model odmówił odpowiedzi (kategoria: {category})",
+  "ai.polish_timeout": "Dostawca AI nie odpowiedział na czas",
   "import.unsupported_format": "Nieobsługiwany format pliku ({error})",
   "import.no_audio_track": "Plik nie zawiera ścieżki dźwiękowej",
   "import.no_track_params": "Brak parametrów ścieżki dźwiękowej",

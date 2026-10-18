@@ -133,6 +133,8 @@ pub struct Settings {
     /// Read the names and terms shown in the focused window (macOS) — a temporary vocabulary for
     /// one dictation.
     pub dictation_window_context: bool,
+    /// Send the dictated text to the AI provider (`ai_provider`) to fix misrecognized words.
+    pub dictation_polish: bool,
 
     /// Model for transcription after recording (and for imports).
     pub meeting_engine: EngineId,
@@ -185,6 +187,7 @@ impl Default for Settings {
             dictation_history: true,
             dictation_context: true,
             dictation_window_context: true,
+            dictation_polish: false,
             // Whisper turbo makes clearly fewer errors in conversations (compared on a daily recording:
             // 12.8% vs 19.6% word errors for Parakeet); after recording, time doesn't matter.
             meeting_engine: EngineId::WhisperTurbo,

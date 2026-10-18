@@ -124,6 +124,7 @@
   "ai.error.empty_anthropic": "Empty model response (stop_reason: {reason})",
   "ai.error.refused": "The model refused to answer",
   "ai.error.refused_category": "The model refused to answer (category: {category})",
+  "ai.polish_timeout": "The AI provider did not answer in time",
   "import.unsupported_format": "Unsupported file format ({error})",
   "import.no_audio_track": "The file has no audio track",
   "import.no_track_params": "No audio track parameters",
