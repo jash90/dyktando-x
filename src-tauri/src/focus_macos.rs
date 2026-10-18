@@ -26,6 +26,10 @@ extern "C" {
     fn CFStringCreateWithCString(alloc: CFTypeRef, s: *const c_char, encoding: u32) -> CFStringRef;
     fn CFStringGetCString(s: CFStringRef, buf: *mut c_char, size: isize, encoding: u32) -> u8;
     fn CFStringGetLength(s: CFStringRef) -> isize;
+    fn CFRetain(cf: CFTypeRef) -> CFTypeRef;
+    fn CFArrayGetTypeID() -> usize;
+    fn CFArrayGetCount(array: CFTypeRef) -> isize;
+    fn CFArrayGetValueAtIndex(array: CFTypeRef, index: isize) -> CFTypeRef;
     fn CFStringGetCharacters(s: CFStringRef, range: CFRange, buf: *mut u16);
     static kCFBooleanTrue: CFTypeRef;
 }
@@ -41,6 +45,10 @@ const AX_VALUE_CF_RANGE: u32 = 4;
 /// How much of the field around the cursor we read (UTF-16 units).
 const FIELD_BEFORE: isize = 2000;
 const FIELD_AFTER: isize = 500;
+/// Limits of reading the focused window's texts (Electron trees can be huge and slow).
+const WINDOW_NODES: usize = 1500;
+const WINDOW_CHARS: usize = 20_000;
+const WINDOW_TIME: std::time::Duration = std::time::Duration::from_millis(300);
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -191,5 +199,50 @@ pub fn field_text() -> Option<super::FieldText> {
             selected: string_range(value.0, start, end),
             after: string_range(value.0, end, end + FIELD_AFTER),
         })
+    }
+}
+
+/// A string attribute of any length (the first `max` UTF-16 units).
+unsafe fn long_string_attr(el: AXUIElementRef, name: &str, max: isize) -> Option<String> {
+    let v = copy_attr(el, name).ok()?;
+    (!v.0.is_null() && CFGetTypeID(v.0) == CFStringGetTypeID()).then(|| string_range(v.0, 0, max))
+}
+
+/// Texts of the focused window (values, titles, descriptions) in tree order, within time and size
+/// limits; password fields skipped.
+pub fn window_text() -> Option<String> {
+    let deadline = std::time::Instant::now() + WINDOW_TIME;
+    unsafe {
+        let (_, app_el) = focused_app().ok()?;
+        let window = copy_attr(app_el.0, "AXFocusedWindow").ok().filter(|w| !w.0.is_null())?;
+        let mut queue = std::collections::VecDeque::from([window]);
+        let (mut out, mut nodes) = (String::new(), 0);
+        while let Some(el) = queue.pop_front() {
+            nodes += 1;
+            if nodes > WINDOW_NODES || out.len() > WINDOW_CHARS || std::time::Instant::now() > deadline {
+                break;
+            }
+            AXUIElementSetMessagingTimeout(el.0, 0.1);
+            if string_attr(el.0, "AXRole").as_deref() == Some("AXSecureTextField") {
+                continue;
+            }
+            for attr in ["AXTitle", "AXValue", "AXDescription"] {
+                if let Some(text) = long_string_attr(el.0, attr, 2000).filter(|t| !t.trim().is_empty()) {
+                    out.push_str(text.trim());
+                    out.push('\n');
+                }
+            }
+            let Ok(children) = copy_attr(el.0, "AXChildren") else { continue };
+            if children.0.is_null() || CFGetTypeID(children.0) != CFArrayGetTypeID() {
+                continue;
+            }
+            for i in 0..CFArrayGetCount(children.0) {
+                let child = CFArrayGetValueAtIndex(children.0, i);
+                if !child.is_null() {
+                    queue.push_back(Owned(CFRetain(child)));
+                }
+            }
+        }
+        Some(out)
     }
 }

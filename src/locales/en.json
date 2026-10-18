@@ -53,6 +53,8 @@
   "dictation.paste_mode.clipboard_only": "Copy to clipboard only",
   "dictation.paste_mode_hint": "After pasting, the previous clipboard contents (text) are restored.",
   "dictation.title": "Dictation",
+  "dictation.window_context": "Suggest names shown in the window",
+  "dictation.window_context_hint": "macOS only. For one dictation, names and terms shown in the active window (e.g. \"GitHub\", \"Hisense\", names in a chat) work like the vocabulary: Whisper gets them as a hint, and every model fixes their case and diacritics. The window is read locally and nothing is saved.",
   "dictations.audio_deleted": "recording deleted",
   "dictations.audio_was_deleted": "The recording has been deleted",
   "dictations.clipboard_only": "clipboard only",

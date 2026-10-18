@@ -30,3 +30,8 @@ pub fn snapshot() -> super::Snapshot {
 pub fn field_text() -> Option<super::FieldText> {
     None
 }
+
+/// Not read on Windows yet.
+pub fn window_text() -> Option<String> {
+    None
+}

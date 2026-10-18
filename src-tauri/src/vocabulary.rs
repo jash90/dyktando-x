@@ -5,6 +5,9 @@
 //! - `wrong spelling -> Right spelling` is an explicit replacement (whole words, case-insensitive),
 //! - a plain term fixes the spelling and case of near matches ("hisense", "hi sense", "tyzen" →
 //!   "Hisense", "Tizen") and keeps Polish endings ("klaudiuszem" → "Klaudiuszem").
+//!
+//! Names read from the focused window (`with_context`, `names_in`) are weak terms: they only fix
+//! case, spacing and diacritics, never a different spelling — the window has many of them.
 
 /// Shorter terms are only replaced explicitly: "ci" is a Polish word, not "CI".
 const MIN_TERM_CHARS: usize = 4;
@@ -36,6 +39,8 @@ struct Term {
     /// For fuzzy comparison: see `fold`.
     key: Vec<char>,
     words: usize,
+    /// From the window's texts: only an exact (folded) match counts.
+    weak: bool,
 }
 
 #[derive(Clone)]
@@ -69,10 +74,24 @@ impl Vocabulary {
     }
 
     fn add_term(&mut self, text: &str) {
-        if text.is_empty() || self.terms.iter().any(|t| t.text == text) {
+        self.push_term(text, false);
+    }
+
+    fn push_term(&mut self, text: &str, weak: bool) {
+        let key = fold(text);
+        if text.is_empty() || self.terms.iter().any(|t| t.text == text || (weak && t.key == key)) {
             return;
         }
-        self.terms.push(Term { text: text.to_string(), lower: lower_chars(text), key: fold(text), words: text.split_whitespace().count() });
+        self.terms.push(Term { text: text.to_string(), lower: lower_chars(text), key, words: text.split_whitespace().count(), weak });
+    }
+
+    /// The vocabulary with names from the focused window added as weak terms (see the module docs).
+    pub fn with_context(&self, names: &[String]) -> Self {
+        let mut v = self.clone();
+        for name in names {
+            v.push_term(name, true);
+        }
+        v
     }
 
     /// Initial prompt for Whisper: the terms (without the replacement syntax); empty = none.
@@ -164,7 +183,8 @@ impl Term {
             return None;
         }
         let edits = levenshtein(&key, &self.key);
-        (edits <= allowed_edits(self.key.len())).then(|| (edits, self.text.clone()))
+        let allowed = if self.weak { 0 } else { allowed_edits(self.key.len()) };
+        (edits <= allowed).then(|| (edits, self.text.clone()))
     }
 
     /// The term with the word's Polish ending: everything but the last letter of the term must
@@ -181,6 +201,51 @@ impl Term {
         }
         Some(self.text.chars().take(common).chain(chars[common..].iter().copied()).collect())
     }
+}
+
+/// Names and terms in a text (the focused window's texts), the most frequent first: words with a
+/// capital inside ("NPaw", "GitHub"), letters with digits ("H264"), all caps ("HTTPS"), and
+/// capitalized words seen in the middle of a sentence and never in lowercase ("Hisense", not
+/// "Wczoraj" at the start of one).
+pub fn names_in(text: &str, limit: usize) -> Vec<String> {
+    struct Seen {
+        word: String,
+        count: usize,
+        mid_sentence: bool,
+    }
+    let mut seen: Vec<Seen> = Vec::new();
+    let mut lowercase = std::collections::HashSet::new();
+    for line in text.lines() {
+        let mut sentence_start = true;
+        for token in line.split_whitespace() {
+            let word = core(token);
+            let starts = std::mem::replace(&mut sentence_start, token.ends_with(['.', '!', '?', ':']));
+            if word.chars().count() < MIN_TERM_CHARS || !word.chars().any(char::is_alphabetic) {
+                continue;
+            }
+            if !word.chars().any(char::is_uppercase) {
+                lowercase.insert(lower(word));
+                continue;
+            }
+            match seen.iter_mut().find(|s| s.word == word) {
+                Some(s) => {
+                    s.count += 1;
+                    s.mid_sentence |= !starts;
+                }
+                None => seen.push(Seen { word: word.to_string(), count: 1, mid_sentence: !starts }),
+            }
+        }
+    }
+    let is_name = |s: &Seen| {
+        let w = &s.word;
+        let inner_capital = w.chars().skip(1).any(char::is_uppercase) && w.chars().any(char::is_lowercase);
+        let all_caps = !w.chars().any(char::is_lowercase);
+        let digits = w.chars().any(|c| c.is_ascii_digit());
+        inner_capital || all_caps || digits || (s.mid_sentence && !lowercase.contains(&lower(w)))
+    };
+    let mut names: Vec<&Seen> = seen.iter().filter(|s| is_name(s)).collect();
+    names.sort_by_key(|s| std::cmp::Reverse(s.count));
+    names.into_iter().take(limit).map(|s| s.word.clone()).collect()
 }
 
 /// How many edits a near match of a term of `len` folded characters may have.
@@ -343,6 +408,25 @@ mod tests {
         // A match doesn't cross punctuation.
         assert_eq!(fix(v, "apple, tv"), "apple, tv");
         assert_eq!(fix("", "bez słownika"), "bez słownika");
+    }
+
+    #[test]
+    fn names_from_the_window() {
+        let text = "Wczoraj wdrożyliśmy NPaw na Hisense.\nPR do GitHub: poprawka H264 dla Hisense i zespołu.\nZespół HTTPS";
+        assert_eq!(names_in(text, 10), vec!["Hisense", "NPaw", "GitHub", "H264", "HTTPS"]);
+        assert_eq!(names_in(text, 2), vec!["Hisense", "NPaw"]);
+    }
+
+    #[test]
+    fn window_names_only_fix_exact_spellings() {
+        let v = Vocabulary::parse("Tizen").with_context(&["GitHub".into(), "Hisense".into(), "tizen".into()]);
+        assert_eq!(v.correct("wrzuć na github i hisense"), "wrzuć na GitHub i Hisense");
+        assert_eq!(v.correct("na hisensie"), "na Hisensie");
+        // A near spelling is not enough for a name from the window…
+        assert_eq!(v.correct("telewizor hisens"), "telewizor hisens");
+        // …and it doesn't replace a vocabulary term.
+        assert_eq!(v.correct("system tizen"), "system Tizen");
+        assert_eq!(v.prompt(), "Tizen, GitHub, Hisense");
     }
 
     #[test]
