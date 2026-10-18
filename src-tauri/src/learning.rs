@@ -158,7 +158,9 @@ pub fn entries(corrections: &[Correction], vocabulary: &str) -> Vec<String> {
         } else {
             format!("{} -> {}", c.observed.to_lowercase(), c.edited)
         };
-        if !out.contains(&entry) {
+        // A term kept for a one-word fix doesn't correct the observed word, so the check above
+        // misses it: without this it would be added again at every repeated fix.
+        if !out.contains(&entry) && !current.has_term(&entry) {
             out.push(entry);
         }
     }
@@ -218,6 +220,7 @@ mod tests {
         assert!(entries(&found, "Hisense, cloud kod -> Claude Code, Tizen").is_empty());
         // One real word is never turned into a rule that rewrites it everywhere: the term only.
         assert_eq!(entries(&[c("marką", "Markiem")], ""), vec!["Markiem".to_string()]);
+        assert!(entries(&[c("marką", "Markiem")], "Hisense, Markiem").is_empty());
     }
 
     #[test]
