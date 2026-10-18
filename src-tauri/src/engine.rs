@@ -64,6 +64,12 @@ impl Engine {
         }
     }
 
+    /// Whether the model continues the text before the cursor itself (Whisper), so it chooses the
+    /// case of the first word.
+    pub fn sees_context(&self) -> bool {
+        matches!(self.model, Model::Whisper(_))
+    }
+
     /// Whether the vocabulary has this term (spelled exactly so).
     pub fn has_term(&self, word: &str) -> bool {
         self.vocabulary.has_term(word)

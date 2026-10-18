@@ -234,7 +234,10 @@ fn transcribe_and_insert(
         let raw = e.transcribe(&audio16, settings.language)?;
         // Joined with the field only when the text goes into it.
         let text = match field.filter(|_| should_paste) {
-            Some(f) => postprocess::apply_in(&raw, &Around { before: &f.before, after: &f.after }, |w| e.has_term(w)),
+            Some(f) => {
+                let sees = e.sees_context();
+                postprocess::apply_in(&raw, &Around { before: &f.before, after: &f.after }, |w| sees || e.has_term(w))
+            }
             None => postprocess::apply(&raw),
         };
         (raw, text)

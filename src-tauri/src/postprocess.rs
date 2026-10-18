@@ -105,30 +105,37 @@ fn lowercase_first(text: &str, keep: impl Fn(&str) -> bool) -> String {
     format!("{}{}{}", &text[..at], first.to_lowercase(), &text[at + first.len_utf8()..])
 }
 
-/// Like `apply`, joined with what's already in the field: in the middle of a sentence the first
-/// word stays lowercase (`keep` = a name to leave as is), there's no period when the sentence goes
-/// on after the cursor, and spaces where the words would stick together.
+/// Like `apply`, joined with what's already in the field (see `join`).
 pub fn apply_in(raw: &str, around: &Around, keep: impl Fn(&str) -> bool) -> String {
-    let text = replace_markers(raw);
-    let continues = around.after.trim_start().starts_with(|c: char| c.is_alphanumeric());
-    let text = if continues {
-        let t = text.trim();
-        t.strip_suffix('.').filter(|t| !t.ends_with('.')).unwrap_or(t).to_string()
-    } else {
-        punctuate(&text)
-    };
-    let mut text = smart_space(&capitalize(&text));
-    if mid_sentence(around.before) {
-        text = lowercase_first(&text, keep);
-    }
+    join(&apply(raw), around, keep)
+}
+
+/// A postprocessed text joined with the field: in the middle of a sentence the first word stays
+/// lowercase (`keep` = leave this word as is: a name, or a model that saw the context and chose
+/// the case itself), no period when the sentence goes on after the cursor on the same line, a
+/// period before the next sentence, and spaces where the words would stick together.
+pub fn join(text: &str, around: &Around, keep: impl Fn(&str) -> bool) -> String {
+    let mut text = text.trim().to_string();
     if text.is_empty() {
         return text;
+    }
+    // What follows on the same line: lowercase goes on with this sentence, a capital starts the next.
+    let next = around.after.split('\n').next().unwrap_or("").trim_start().chars().next();
+    if next.is_some_and(|c| c.is_lowercase() || c.is_ascii_digit()) {
+        if let Some(t) = text.strip_suffix('.').filter(|t| !t.ends_with('.')) {
+            text = t.to_string();
+        }
+    } else if next.is_some_and(char::is_uppercase) && !text.ends_with(['.', '!', '?', '…', ':']) {
+        text.push('.');
+    }
+    if mid_sentence(around.before) {
+        text = lowercase_first(&text, keep);
     }
     let opening = "([{„\"'«/-";
     if around.before.chars().last().is_some_and(|c| !c.is_whitespace() && !opening.contains(c)) && text.starts_with(char::is_alphanumeric) {
         text.insert(0, ' ');
     }
-    if continues && around.after.starts_with(char::is_alphanumeric) {
+    if around.after.starts_with(char::is_alphanumeric) {
         text.push(' ');
     }
     text
@@ -187,6 +194,20 @@ mod tests {
         assert_eq!(joined("Bardzo ważny i pilny raport z całego tygodnia", "To jest", "do przeczytania."), " bardzo ważny i pilny raport z całego tygodnia ");
         assert_eq!(joined("Raport.", "", " dla zespołu"), "Raport");
         assert_eq!(joined("to jest dość długie zdanie bez kropki", "", ""), "To jest dość długie zdanie bez kropki.");
+    }
+
+    #[test]
+    fn keeps_the_period_before_the_next_sentence_or_line() {
+        assert_eq!(joined("Nowe zdanie", "Raport. ", "Następne zdanie."), "Nowe zdanie. ");
+        assert_eq!(joined("Nowe zdanie", "Raport. ", " Następne zdanie."), "Nowe zdanie.");
+        assert_eq!(joined("Nowe zdanie tutaj teraz i jutro", "Koniec.", "\nDruga linia"), " Nowe zdanie tutaj teraz i jutro.");
+        // Text on the next line doesn't continue this sentence, whatever its case.
+        assert_eq!(joined("Nowe zdanie tutaj teraz i jutro", "Koniec.", "\nponiżej lista"), " Nowe zdanie tutaj teraz i jutro.");
+    }
+
+    #[test]
+    fn a_model_that_saw_the_context_keeps_its_case() {
+        assert_eq!(apply_in("Tomek przyjdzie", &Around { before: "Jutro", after: "" }, |_| true), " Tomek przyjdzie");
     }
 
     #[test]
