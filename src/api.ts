@@ -31,6 +31,8 @@ export interface Settings {
   meeting_live_engine: EngineId;
   /** Vocabulary of names and terms — a prompt hint for Whisper (dictation and meetings). */
   vocabulary: string;
+  /** Add names the user corrected after a dictation to the vocabulary. */
+  vocabulary_learning: boolean;
   /** Meetings language (independent of dictation). */
   meeting_language: Language;
   meeting_live_transcription: boolean;

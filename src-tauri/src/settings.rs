@@ -154,6 +154,9 @@ pub struct Settings {
     /// Dictionary of names and terms (e.g. "NPaw, Hisense, Tizen, CI/CD") — a hint for Whisper
     /// in dictation and meetings.
     pub vocabulary: String,
+    /// Add names and terms the user corrected after a dictation to the vocabulary (needs
+    /// `dictation_context`: the field is read again at the next dictation).
+    pub vocabulary_learning: bool,
 
     pub ai_provider: ProviderId,
     pub ai_providers: BTreeMap<ProviderId, ProviderConfig>,
@@ -194,6 +197,7 @@ impl Default for Settings {
             meeting_consent_reminder: true,
             shortcut_meeting: "Ctrl+Alt+R".into(),
             vocabulary: String::new(),
+            vocabulary_learning: true,
             ai_provider: ProviderId::Anthropic,
             ai_providers: BTreeMap::new(),
             ai_prompt: String::new(),

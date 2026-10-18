@@ -40,8 +40,13 @@ enum Phase {
     Transcribing,
 }
 
+/// Learning from corrections only looks at a recent paste.
+const LEARN_WITHIN: Duration = Duration::from_secs(30 * 60);
+
 pub struct Dictation {
     phase: Mutex<Phase>,
+    /// The last pasted text, compared with the field at the next dictation (see `learning`).
+    last_pasted: Mutex<Option<(String, Instant)>>,
     engine: Arc<Mutex<Option<(EngineId, Engine)>>>,
     level: Arc<AtomicU32>,
     recording: Arc<AtomicBool>,
@@ -51,6 +56,7 @@ impl Default for Dictation {
     fn default() -> Self {
         Self {
             phase: Mutex::new(Phase::Idle),
+            last_pasted: Mutex::new(None),
             engine: Arc::new(Mutex::new(None)),
             level: Arc::new(AtomicU32::new(0)),
             recording: Arc::new(AtomicBool::new(false)),
@@ -167,12 +173,21 @@ impl Dictation {
         let created_at = chrono::Local::now();
         std::thread::spawn(move || {
             let field = field.and_then(|h| h.join().ok().flatten());
-            let result = transcribe_and_insert(&engine, &samples, rate, &settings, field.as_ref());
             let state = app.state::<AppState>();
+            let previous = state.dictation.last_pasted.lock().unwrap().take();
+            let result = transcribe_and_insert(&engine, &samples, rate, &settings, field.as_ref());
             *state.dictation.phase.lock().unwrap() = Phase::Idle;
+            if let (Some((text, at)), Some(field), true) = (previous, field.as_ref(), settings.vocabulary_learning) {
+                if at.elapsed() < LEARN_WITHIN {
+                    learn(&app, &text, field);
+                }
+            }
             match result {
                 Ok(Some(done)) => {
                     let pasted = done.outcome == paste::Outcome::Pasted;
+                    if pasted {
+                        *state.dictation.last_pasted.lock().unwrap() = Some((done.text.clone(), Instant::now()));
+                    }
                     emit(&app, HudState::Done { text: done.text.clone(), pasted });
                     // After pasting — saving to history doesn't delay inserting the text.
                     if settings.dictation_history {
@@ -195,6 +210,39 @@ impl Dictation {
             }
         });
     }
+}
+
+/// Adds the names the user corrected in the previously pasted text to the vocabulary (the field as
+/// read at this dictation's start), and tells them in the bubble once this dictation's is gone.
+fn learn(app: &AppHandle, pasted: &str, field: &FieldText) {
+    let text = format!("{}{}{}", field.before, field.selected, field.after);
+    let found = crate::learning::corrections(pasted, &text);
+    if found.is_empty() {
+        return;
+    }
+    let state = app.state::<AppState>();
+    let settings = {
+        let mut s = state.settings.lock().unwrap();
+        let entries = crate::learning::entries(&found, &s.vocabulary);
+        if entries.is_empty() {
+            return;
+        }
+        log::info!("Learned from corrections: {entries:?}");
+        s.vocabulary = crate::learning::append(&s.vocabulary, &entries);
+        if let Err(e) = s.save() {
+            log::error!("saving the learned vocabulary: {e}");
+        }
+        let message = crate::i18n::t_with("hud.vocabulary_learned", &[("words", &entries.join(", "))]);
+        (s.clone(), message)
+    };
+    let _ = app.emit("settings-changed", &settings.0);
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(1600));
+        if !app.state::<AppState>().dictation.is_recording() {
+            emit(&app, HudState::Info { message: settings.1 });
+        }
+    });
 }
 
 /// A transcribed and inserted dictation (with the 16 kHz recording — for history).

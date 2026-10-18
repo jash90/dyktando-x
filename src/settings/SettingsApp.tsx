@@ -57,9 +57,13 @@ export default function SettingsApp() {
     const un = listen<string>("open-pane", (e) => {
       if (PANES.some((p) => p.id === e.payload)) setPane(e.payload as PaneId);
     });
+    // The backend changed the settings itself (a vocabulary learned from corrections): a later
+    // change in this window must not save the old copy over it.
+    const unChanged = listen<Settings>("settings-changed", (e) => setSettings(e.payload));
     return () => {
       window.removeEventListener("focus", refreshEnv);
       un.then((f) => f());
+      unChanged.then((f) => f());
     };
   }, [refreshEnv]);
 

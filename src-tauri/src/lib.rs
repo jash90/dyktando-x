@@ -10,6 +10,7 @@ mod hotkeys;
 mod hud;
 mod i18n;
 mod languages;
+mod learning;
 mod logging;
 mod live_window;
 mod meetings;
