@@ -204,9 +204,10 @@ impl Term {
 }
 
 /// Names and terms in a text (the focused window's texts), the most frequent first: words with a
-/// capital inside ("NPaw", "GitHub"), letters with digits ("H264"), all caps ("HTTPS"), and
-/// capitalized words seen in the middle of a sentence and never in lowercase ("Hisense", not
-/// "Wczoraj" at the start of one).
+/// capital inside ("NPaw", "GitHub"), letters with digits ("H264"), and capitalized or all-caps
+/// words seen in the middle of a sentence and never in lowercase ("Hisense", not "Wczoraj" at the
+/// start of one). A line of capitalized words is a UI label ("Mark as Read", "Direct Messages",
+/// "TODO"), not a sentence, so it gives no evidence.
 pub fn names_in(text: &str, limit: usize) -> Vec<String> {
     struct Seen {
         word: String,
@@ -216,6 +217,7 @@ pub fn names_in(text: &str, limit: usize) -> Vec<String> {
     let mut seen: Vec<Seen> = Vec::new();
     let mut lowercase = std::collections::HashSet::new();
     for line in text.lines() {
+        let label = line.split_whitespace().map(core).filter(|w| w.chars().count() >= MIN_TERM_CHARS).all(|w| w.starts_with(char::is_uppercase));
         let mut sentence_start = true;
         for token in line.split_whitespace() {
             let word = core(token);
@@ -230,18 +232,17 @@ pub fn names_in(text: &str, limit: usize) -> Vec<String> {
             match seen.iter_mut().find(|s| s.word == word) {
                 Some(s) => {
                     s.count += 1;
-                    s.mid_sentence |= !starts;
+                    s.mid_sentence |= !starts && !label;
                 }
-                None => seen.push(Seen { word: word.to_string(), count: 1, mid_sentence: !starts }),
+                None => seen.push(Seen { word: word.to_string(), count: 1, mid_sentence: !starts && !label }),
             }
         }
     }
     let is_name = |s: &Seen| {
         let w = &s.word;
         let inner_capital = w.chars().skip(1).any(char::is_uppercase) && w.chars().any(char::is_lowercase);
-        let all_caps = !w.chars().any(char::is_lowercase);
         let digits = w.chars().any(|c| c.is_ascii_digit());
-        inner_capital || all_caps || digits || (s.mid_sentence && !lowercase.contains(&lower(w)))
+        inner_capital || digits || (s.mid_sentence && !lowercase.contains(&lower(w)))
     };
     let mut names: Vec<&Seen> = seen.iter().filter(|s| is_name(s)).collect();
     names.sort_by_key(|s| std::cmp::Reverse(s.count));
@@ -412,9 +413,11 @@ mod tests {
 
     #[test]
     fn names_from_the_window() {
-        let text = "Wczoraj wdrożyliśmy NPaw na Hisense.\nPR do GitHub: poprawka H264 dla Hisense i zespołu.\nZespół HTTPS";
-        assert_eq!(names_in(text, 10), vec!["Hisense", "NPaw", "GitHub", "H264", "HTTPS"]);
-        assert_eq!(names_in(text, 2), vec!["Hisense", "NPaw"]);
+        let text = "Wczoraj wdrożyliśmy NPaw na Hisense.\nPR do GitHub: poprawka H264 dla Hisense i zespołu przez HTTPS.\nZespół HTTPS";
+        assert_eq!(names_in(text, 10), vec!["Hisense", "HTTPS", "NPaw", "GitHub", "H264"]);
+        assert_eq!(names_in(text, 2), vec!["Hisense", "HTTPS"]);
+        // UI labels and headers are not names.
+        assert!(names_in("Mark as Read\nDirect Messages\nCopy Link · Show More\nTODO\nNOTE", 10).is_empty());
     }
 
     #[test]

@@ -223,7 +223,9 @@ pub fn window_text() -> Option<String> {
                 break;
             }
             AXUIElementSetMessagingTimeout(el.0, 0.1);
-            if string_attr(el.0, "AXRole").as_deref() == Some("AXSecureTextField") {
+            // A password field is `AXTextField` with the subrole `AXSecureTextField`.
+            let secure = |attr| string_attr(el.0, attr).as_deref() == Some("AXSecureTextField");
+            if secure("AXRole") || secure("AXSubrole") {
                 continue;
             }
             for attr in ["AXTitle", "AXValue", "AXDescription"] {

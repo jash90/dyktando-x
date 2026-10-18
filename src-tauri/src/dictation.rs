@@ -194,7 +194,8 @@ impl Dictation {
         std::thread::spawn(move || {
             let Context { field, names } = context.and_then(|h| h.join().ok()).unwrap_or_default();
             if !names.is_empty() {
-                log::info!("Names from the window: {names:?}");
+                // Only the count: the names are other people's content (chats, mail).
+                log::info!("Names from the window: {}", names.len());
             }
             let state = app.state::<AppState>();
             let previous = state.dictation.last_pasted.lock().unwrap().take();
