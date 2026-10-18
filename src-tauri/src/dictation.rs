@@ -179,7 +179,8 @@ impl Dictation {
             *state.dictation.phase.lock().unwrap() = Phase::Idle;
             if let (Some((text, at)), Some(field), true) = (previous, field.as_ref(), settings.vocabulary_learning) {
                 if at.elapsed() < LEARN_WITHIN {
-                    learn(&app, &text, field);
+                    // An error stays in the bubble: the notice would replace it.
+                    learn(&app, &text, field, result.is_ok());
                 }
             }
             match result {
@@ -213,8 +214,9 @@ impl Dictation {
 }
 
 /// Adds the names the user corrected in the previously pasted text to the vocabulary (the field as
-/// read at this dictation's start), and tells them in the bubble once this dictation's is gone.
-fn learn(app: &AppHandle, pasted: &str, field: &FieldText) {
+/// read at this dictation's start), and tells them in the bubble (`notify`) once this dictation's
+/// is gone.
+fn learn(app: &AppHandle, pasted: &str, field: &FieldText, notify: bool) {
     let text = format!("{}{}{}", field.before, field.selected, field.after);
     let found = crate::learning::corrections(pasted, &text);
     if found.is_empty() {
@@ -236,6 +238,9 @@ fn learn(app: &AppHandle, pasted: &str, field: &FieldText) {
         (s.clone(), message)
     };
     let _ = app.emit("settings-changed", &settings.0);
+    if !notify {
+        return;
+    }
     let app = app.clone();
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_millis(1600));

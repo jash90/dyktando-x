@@ -2,7 +2,8 @@
 //! dictionary): the next dictation reads the field again, finds the previously pasted text in it,
 //! and where the user replaced misrecognized words with a name or a term, adds it to the
 //! vocabulary. Only name-like corrections are learned (a capital letter, a digit, a foreign
-//! letter, an inner symbol); "zrobię → zrobimy" is an edit, not a misrecognized word.
+//! letter, letters with digits, an inner symbol); "zrobię → zrobimy" or "2024 → 2025" is an
+//! edit, not a misrecognized word.
 use crate::vocabulary::{fold, levenshtein, Vocabulary};
 
 /// More from one dictation would mostly be a rewritten sentence.
@@ -79,7 +80,9 @@ fn align(pasted: &[&str], field: &[&str]) -> (usize, Vec<(Op, Option<usize>, Opt
 /// change isn't just the start of a sentence.
 fn name_like(edited: &str, observed: &str, sentence_start: bool) -> bool {
     let inner_symbol = edited.split_whitespace().any(|w| core(w).contains(['/', '-', '.', '_', '&', '+']));
-    let foreign = edited.chars().any(|c| c.is_ascii_digit() || "qvxQVX".contains(c));
+    // Digits only next to letters ("H264"): a changed number or time is an edit of the content.
+    let foreign = edited.chars().any(|c| "qvxQVX".contains(c))
+        || edited.split_whitespace().any(|w| core(w).chars().any(|c| c.is_ascii_digit()) && core(w).chars().any(char::is_alphabetic));
     let capital = edited.split_whitespace().enumerate().any(|(i, w)| {
         let mut chars = core(w).chars();
         let first_only = chars.next().is_some_and(char::is_uppercase) && !chars.any(char::is_uppercase);
@@ -140,7 +143,9 @@ pub fn corrections(pasted: &str, field: &str) -> Vec<Correction> {
 }
 
 /// Vocabulary entries for the corrections the vocabulary doesn't handle yet: the term alone
-/// when it already fixes the observed spelling, otherwise an explicit replacement.
+/// when it already fixes the observed spelling or when one word was replaced (a replacement rule
+/// for a real word — "marką → Markiem" — would rewrite that word everywhere), otherwise an
+/// explicit replacement of the words a name was split into ("en paw -> NPaw").
 pub fn entries(corrections: &[Correction], vocabulary: &str) -> Vec<String> {
     let current = Vocabulary::parse(vocabulary);
     let mut out: Vec<String> = Vec::new();
@@ -148,7 +153,7 @@ pub fn entries(corrections: &[Correction], vocabulary: &str) -> Vec<String> {
         if current.correct(&c.observed) == c.edited {
             continue;
         }
-        let entry = if Vocabulary::parse(&c.edited).correct(&c.observed) == c.edited {
+        let entry = if Vocabulary::parse(&c.edited).correct(&c.observed) == c.edited || !c.observed.contains(' ') {
             c.edited.clone()
         } else {
             format!("{} -> {}", c.observed.to_lowercase(), c.edited)
@@ -200,6 +205,10 @@ mod tests {
         assert!(corrections("Spotkanie jutro", "Spotkanie jutro").is_empty());
         // A different word, not a fixed spelling.
         assert!(corrections("Zadzwoń do Marka jutro rano", "Zadzwoń do Zbigniewa jutro rano").is_empty());
+        // Changed numbers and times are edits of the content; letters with digits are terms.
+        assert!(corrections("Raport za 2024 jest gotowy", "Raport za 2025 jest gotowy").is_empty());
+        assert!(corrections("Spotkanie o 15:30 w sali", "Spotkanie o 16:30 w sali").is_empty());
+        assert_eq!(corrections("Kodek h265 działa dobrze", "Kodek h264 działa dobrze"), vec![c("h265", "h264")]);
     }
 
     #[test]
@@ -207,6 +216,8 @@ mod tests {
         let found = [c("hisens", "Hisense"), c("cloud kod", "Claude Code"), c("tizen", "Tizen")];
         assert_eq!(entries(&found, "Tizen"), vec!["Hisense".to_string(), "cloud kod -> Claude Code".to_string()]);
         assert!(entries(&found, "Hisense, cloud kod -> Claude Code, Tizen").is_empty());
+        // One real word is never turned into a rule that rewrites it everywhere: the term only.
+        assert_eq!(entries(&[c("marką", "Markiem")], ""), vec!["Markiem".to_string()]);
     }
 
     #[test]
