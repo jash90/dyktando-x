@@ -54,6 +54,8 @@
   "dictation.paste_mode.auto": "Wklejaj, gdy fokus jest w polu tekstowym",
   "dictation.paste_mode.clipboard_only": "Tylko kopiuj do schowka",
   "dictation.paste_mode_hint": "Po wklejeniu poprzednia zawartość schowka (tekst) wraca na miejsce.",
+  "dictation.polish": "Poprawiaj rozpoznane słowa przez AI",
+  "dictation.polish_hint": "Podyktowany tekst (ze słownikiem i fragmentem tekstu przed kursorem) idzie do dostawcy wybranego w zakładce AI, który poprawia źle rozpoznane nazwy i słowa — bez przeredagowania. Nagranie zostaje na komputerze. Wybierz szybki model: dyktowanie czeka na odpowiedź do 8 s, a przy błędzie, braku klucza albo odpowiedzi, która nie jest poprawką, wkleja się tekst lokalny.",
   "dictation.title": "Dyktowanie",
   "dictation.window_context": "Podpowiadaj nazwy widoczne w oknie",
   "dictation.window_context_hint": "Tylko macOS. Na czas dyktowania nazwy i terminy widoczne w aktywnym oknie (np. „GitHub”, „Hisense”, imiona z czatu) działają jak słownik: Whisper dostaje je jako podpowiedź, a każdy model poprawia ich wielkość liter i polskie znaki. Okno jest czytane lokalnie i nic nie jest zapisywane.",

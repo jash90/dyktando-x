@@ -90,6 +90,11 @@ export default function DictationPane({ settings, update }: PaneProps) {
           {t("dictation.window_context")}
         </label>
         <p className="hint">{t("dictation.window_context_hint")}</p>
+        <label>
+          <input type="checkbox" checked={settings.dictation_polish} onChange={(e) => update({ dictation_polish: e.target.checked })} />
+          {t("dictation.polish")}
+        </label>
+        <p className="hint">{t("dictation.polish_hint")}</p>
         <AutostartToggle />
       </div>
       <h2>{t("dictation.commands")}</h2>

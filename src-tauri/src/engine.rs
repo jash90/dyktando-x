@@ -79,6 +79,11 @@ impl Engine {
         matches!(self.model, Model::Whisper(_))
     }
 
+    /// The terms in use (the vocabulary and the window's names), as `Vocabulary::prompt`.
+    pub fn terms(&self) -> String {
+        self.active.prompt()
+    }
+
     /// Whether the vocabulary has this term (spelled exactly so).
     pub fn has_term(&self, word: &str) -> bool {
         self.active.has_term(word)

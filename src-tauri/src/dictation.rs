@@ -274,6 +274,30 @@ fn learn(app: &AppHandle, pasted: &str, field: &FieldText, notify: bool) {
     });
 }
 
+/// The text corrected by the AI provider, with the spaces that join it with the field kept; on
+/// any error (no key, timeout, network) the local text, so dictation never fails because of it.
+fn polish(settings: &Settings, text: &str, terms: &str, field: Option<&FieldText>) -> String {
+    let core = text.trim();
+    if core.is_empty() {
+        return text.to_string();
+    }
+    let t0 = Instant::now();
+    let hints = crate::ai::polish::Hints { vocabulary: terms, before: field.map_or("", |f| f.before.as_str()) };
+    let result = crate::ai::provider::LlmConfig::load(settings, settings.ai_provider)
+        .and_then(|config| crate::ai::polish::polish(&config, core, &hints));
+    match result {
+        Ok(polished) => {
+            log::info!("AI correction in {:.2} s: {polished:?}", t0.elapsed().as_secs_f32());
+            let (lead, trail) = (&text[..text.len() - text.trim_start().len()], &text[text.trim_end().len()..]);
+            format!("{lead}{polished}{trail}")
+        }
+        Err(e) => {
+            log::warn!("AI correction skipped: {e}");
+            text.to_string()
+        }
+    }
+}
+
 /// A transcribed and inserted dictation (with the 16 kHz recording — for history).
 struct Done {
     text: String,
@@ -300,7 +324,7 @@ fn transcribe_and_insert(
         PasteMode::Auto => crate::focus::should_paste(),
     };
     let t0 = Instant::now();
-    let (raw, text) = {
+    let (raw, text, terms) = {
         let mut guard = engine.lock().unwrap();
         if guard.as_ref().map(|(i, _)| *i) != Some(settings.engine) {
             *guard = None;
@@ -319,8 +343,9 @@ fn transcribe_and_insert(
             }
             None => postprocess::apply(&raw),
         };
-        (raw, text)
+        (raw, text, e.terms())
     };
+    let text = if settings.dictation_polish { polish(settings, &text, &terms, field) } else { text };
     log::info!(
         "Transcribed {:.1} s of audio in {:.2} s: {raw:?}",
         audio16.len() as f32 / 16_000.0,
