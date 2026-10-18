@@ -4,13 +4,16 @@ use anyhow::{anyhow, Result};
 use serde::Serialize;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::audio::{self, capture::InputCapture, resample};
 use crate::dictations;
 use crate::engine::Engine;
+use crate::focus::FieldText;
 use crate::models::EngineId;
+use crate::postprocess::{self, Around};
 use crate::paste;
 use crate::settings::{PasteMode, Settings};
 use crate::AppState;
@@ -32,7 +35,8 @@ pub enum HudState {
 
 enum Phase {
     Idle,
-    Recording { capture: InputCapture, buffer: Arc<Mutex<Vec<f32>>>, started: Instant },
+    /// `field`: the focused field's text, read while recording (the app still has focus).
+    Recording { capture: InputCapture, buffer: Arc<Mutex<Vec<f32>>>, started: Instant, field: Option<JoinHandle<Option<FieldText>>> },
     Transcribing,
 }
 
@@ -109,7 +113,8 @@ impl Dictation {
             Ok(capture) => {
                 log::info!("Recording: {} @ {} Hz", capture.device_name, capture.sample_rate);
                 let started = Instant::now();
-                *phase = Phase::Recording { capture, buffer, started };
+                let field = settings.dictation_context.then(|| std::thread::spawn(crate::focus::field_text));
+                *phase = Phase::Recording { capture, buffer, started, field };
                 self.recording.store(true, Ordering::Relaxed);
                 emit(app, HudState::Recording { level: 0.0, seconds: 0.0 });
                 self.spawn_level_ticker(app.clone(), started);
@@ -141,7 +146,7 @@ impl Dictation {
     /// Ends the recording; `cancel` discards it without transcription.
     pub fn stop(&self, app: &AppHandle, settings: Settings, cancel: bool) {
         let mut phase = self.phase.lock().unwrap();
-        let Phase::Recording { capture, buffer, started } = std::mem::replace(&mut *phase, Phase::Idle) else {
+        let Phase::Recording { capture, buffer, started, field } = std::mem::replace(&mut *phase, Phase::Idle) else {
             return;
         };
         self.recording.store(false, Ordering::Relaxed);
@@ -161,7 +166,8 @@ impl Dictation {
         let engine = self.engine.clone();
         let created_at = chrono::Local::now();
         std::thread::spawn(move || {
-            let result = transcribe_and_insert(&engine, &samples, rate, &settings);
+            let field = field.and_then(|h| h.join().ok().flatten());
+            let result = transcribe_and_insert(&engine, &samples, rate, &settings, field.as_ref());
             let state = app.state::<AppState>();
             *state.dictation.phase.lock().unwrap() = Phase::Idle;
             match result {
@@ -204,13 +210,19 @@ fn transcribe_and_insert(
     samples: &[f32],
     rate: u32,
     settings: &Settings,
+    field: Option<&FieldText>,
 ) -> Result<Option<Done>> {
     if audio::is_digital_silence(samples) {
         return Err(anyhow!(crate::i18n::t("dictation.digital_silence")));
     }
     let audio16 = resample::to_16k(samples, rate)?;
+    let should_paste = match settings.paste_mode {
+        PasteMode::ClipboardOnly => false,
+        PasteMode::Always => true,
+        PasteMode::Auto => crate::focus::should_paste(),
+    };
     let t0 = Instant::now();
-    let raw = {
+    let (raw, text) = {
         let mut guard = engine.lock().unwrap();
         if guard.as_ref().map(|(i, _)| *i) != Some(settings.engine) {
             *guard = None;
@@ -218,22 +230,24 @@ fn transcribe_and_insert(
         }
         let (_, e) = guard.as_mut().expect("engine loaded");
         e.set_vocabulary(&settings.vocabulary);
-        e.transcribe(&audio16, settings.language)?
+        e.set_context(field.map(|f| f.before.as_str()));
+        let raw = e.transcribe(&audio16, settings.language)?;
+        // Joined with the field only when the text goes into it.
+        let text = match field.filter(|_| should_paste) {
+            Some(f) => postprocess::apply_in(&raw, &Around { before: &f.before, after: &f.after }, |w| e.has_term(w)),
+            None => postprocess::apply(&raw),
+        };
+        (raw, text)
     };
     log::info!(
         "Transcribed {:.1} s of audio in {:.2} s: {raw:?}",
         audio16.len() as f32 / 16_000.0,
         t0.elapsed().as_secs_f32()
     );
-    let text = crate::postprocess::apply(&raw);
-    if text.is_empty() {
+    if text.trim().is_empty() {
         return Ok(None);
     }
-    let should_paste = match settings.paste_mode {
-        PasteMode::ClipboardOnly => false,
-        PasteMode::Always => true,
-        PasteMode::Auto => crate::focus::should_paste(),
-    };
     let outcome = paste::insert(&text, should_paste)?;
-    Ok(Some(Done { text, raw, outcome, audio16 }))
+    // History and the bubble show the text without the spaces that join it with the field.
+    Ok(Some(Done { text: text.trim().to_string(), raw, outcome, audio16 }))
 }

@@ -25,3 +25,8 @@ pub fn snapshot() -> super::Snapshot {
     }
     snap
 }
+
+/// Not read on Windows yet (UI Automation's text ranges differ per app).
+pub fn field_text() -> Option<super::FieldText> {
+    None
+}

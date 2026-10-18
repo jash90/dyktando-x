@@ -127,6 +127,9 @@ pub struct Settings {
     pub hud_enabled: bool,
     /// Save every dictation (text and recording) to history — locally, like meetings.
     pub dictation_history: bool,
+    /// Read the focused field's text around the cursor (macOS): a hint for Whisper, and the
+    /// dictation joins the sentence it continues (case, spaces, period).
+    pub dictation_context: bool,
 
     /// Model for transcription after recording (and for imports).
     pub meeting_engine: EngineId,
@@ -174,6 +177,7 @@ impl Default for Settings {
             paste_mode: PasteMode::Auto,
             hud_enabled: true,
             dictation_history: true,
+            dictation_context: true,
             // Whisper turbo makes clearly fewer errors in conversations (compared on a daily recording:
             // 12.8% vs 19.6% word errors for Parakeet); after recording, time doesn't matter.
             meeting_engine: EngineId::WhisperTurbo,

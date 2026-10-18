@@ -13,10 +13,14 @@ pub struct Whisper {
     _context: WhisperContext,
     /// Initial prompt (the vocabulary's names and terms) — Whisper then spells them right more often.
     prompt: Option<String>,
+    /// Text before the cursor: Whisper continues it in the same style and spelling.
+    context: Option<String>,
 }
 
 /// A longer dictionary wouldn't fit anyway (Whisper takes about 220 prompt tokens).
 const MAX_PROMPT_CHARS: usize = 600;
+/// The end of the text before the cursor that goes into the prompt (after the vocabulary).
+const MAX_CONTEXT_CHARS: usize = 250;
 
 /// Words for comparison: lowercase, no punctuation.
 fn plain(text: &str) -> String {
@@ -29,6 +33,38 @@ fn plain(text: &str) -> String {
 fn is_prompt_echo(text: &str, prompt: &str) -> bool {
     let t = plain(text);
     t.contains(' ') && format!(" {} ", plain(prompt)).contains(&format!(" {t} "))
+}
+
+/// The context read out instead of an utterance. Shorter phrases ("tak jest") can really be said
+/// again, so only from three words.
+fn is_context_echo(text: &str, context: &str) -> bool {
+    plain(text).split(' ').count() >= 3 && is_prompt_echo(text, context)
+}
+
+/// The end of `text`, at most `max` characters, starting at a word.
+fn tail(text: &str, max: usize) -> &str {
+    let text = text.trim();
+    let n = text.chars().count();
+    if n <= max {
+        return text;
+    }
+    let cut = text.char_indices().nth(n - max).map_or(0, |(i, _)| i);
+    let rest = &text[cut..];
+    rest.find(char::is_whitespace).map_or(rest, |i| rest[i..].trim_start())
+}
+
+/// Vocabulary first, then the text before the cursor — the closest to the utterance, so the
+/// strongest hint for its style.
+fn initial_prompt(prompt: Option<&str>, context: Option<&str>) -> Option<String> {
+    let context = context.map(|c| tail(c, MAX_CONTEXT_CHARS)).filter(|c| !c.is_empty());
+    let room = MAX_PROMPT_CHARS - context.map_or(0, |c| c.chars().count() + 1);
+    let prompt = prompt.map(|p| p.chars().take(room).collect::<String>()).filter(|p| !p.is_empty());
+    match (prompt, context) {
+        (Some(p), Some(c)) => Some(format!("{p}\n{c}")),
+        (Some(p), None) => Some(p),
+        (None, Some(c)) => Some(c.to_string()),
+        (None, None) => None,
+    }
 }
 
 /// Threads for language detection (whisper.cpp takes min(4, cores) itself when decoding).
@@ -49,13 +85,18 @@ impl Whisper {
         let path = path.to_str().with_context(|| crate::i18n::t("whisper.path_not_utf8"))?;
         let context = WhisperContext::new_with_params(path, params).map_err(|e| anyhow!("{e}"))?;
         let state = context.create_state().map_err(|e| anyhow!("{e}"))?;
-        Ok(Self { state, _context: context, prompt: None })
+        Ok(Self { state, _context: context, prompt: None, context: None })
     }
 
     /// Names and terms (e.g. "NPaw, Hisense, Tizen, CI/CD"); empty = no prompt.
     pub fn set_prompt(&mut self, prompt: &str) {
         let v = prompt.split_whitespace().collect::<Vec<_>>().join(" ");
         self.prompt = (!v.is_empty()).then(|| v.chars().take(MAX_PROMPT_CHARS).collect());
+    }
+
+    /// Text before the cursor for the next transcriptions; None = no context.
+    pub fn set_context(&mut self, context: Option<&str>) {
+        self.context = context.map(str::trim).filter(|c| !c.is_empty()).map(str::to_string);
     }
 
     /// The most likely language of the utterance among `candidates` (whisper.cpp codes).
@@ -83,7 +124,8 @@ impl Whisper {
         params.set_suppress_nst(true);
         params.set_no_speech_thold(0.2);
         params.set_no_context(true);
-        if let Some(prompt) = self.prompt.as_deref() {
+        let initial = initial_prompt(self.prompt.as_deref(), self.context.as_deref());
+        if let Some(prompt) = initial.as_deref() {
             params.set_initial_prompt(prompt);
         }
         self.state.full(params, samples).map_err(|e| anyhow!("{e}"))?;
@@ -92,7 +134,9 @@ impl Whisper {
             let segment = self.state.get_segment(i).ok_or_else(|| anyhow!(crate::i18n::t_with("whisper.no_segment", &[("index", &i)])))?;
             text.push_str(segment.to_str().map_err(|e| anyhow!("{e}"))?);
         }
-        if self.prompt.as_deref().is_some_and(|p| is_prompt_echo(&text, p)) {
+        if self.prompt.as_deref().is_some_and(|p| is_prompt_echo(&text, p))
+            || self.context.as_deref().is_some_and(|c| is_context_echo(&text, tail(c, MAX_CONTEXT_CHARS)))
+        {
             return Ok(String::new());
         }
         Ok(text.trim().to_string())
@@ -115,5 +159,25 @@ mod tests {
         assert!(!is_prompt_echo("Ci", prompt));
         // Whole words only: "sense tizen" is not a piece of "Hisense, Tizen".
         assert!(!is_prompt_echo("sense Tizen", prompt));
+    }
+
+    #[test]
+    fn context_follows_the_vocabulary_and_fits() {
+        assert_eq!(initial_prompt(None, None), None);
+        assert_eq!(initial_prompt(Some("NPaw, Tizen"), None).as_deref(), Some("NPaw, Tizen"));
+        assert_eq!(initial_prompt(Some("NPaw"), Some("  Wczoraj pisałem, że ")).as_deref(), Some("NPaw\nWczoraj pisałem, że"));
+        let long = "słowo ".repeat(200);
+        let c = initial_prompt(Some(&"a".repeat(1000)), Some(&long)).unwrap();
+        assert!(c.chars().count() <= MAX_PROMPT_CHARS, "{}", c.chars().count());
+        // The context starts at a word, not in the middle of one.
+        assert!(c.split('\n').nth(1).unwrap().starts_with("słowo"));
+    }
+
+    #[test]
+    fn a_read_out_context_is_not_an_utterance() {
+        let context = "Cześć, przesyłam raport z wczoraj. Tak jest";
+        assert!(is_context_echo("przesyłam raport z wczoraj", context));
+        assert!(!is_context_echo("Tak jest", context));
+        assert!(!is_context_echo("przesyłam jutro nowy raport", context));
     }
 }

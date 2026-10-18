@@ -80,6 +80,10 @@ impl Vocabulary {
         self.terms.iter().map(|t| t.text.as_str()).collect::<Vec<_>>().join(", ")
     }
 
+    pub fn has_term(&self, word: &str) -> bool {
+        self.terms.iter().any(|t| t.text == word || t.text.split_whitespace().next() == Some(word))
+    }
+
     pub fn is_empty(&self) -> bool {
         self.terms.is_empty()
     }

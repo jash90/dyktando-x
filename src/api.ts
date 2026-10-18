@@ -23,6 +23,8 @@ export interface Settings {
   hud_enabled: boolean;
   /** Save every dictation (text and recording) in the history. */
   dictation_history: boolean;
+  /** Read the focused field's text around the cursor (macOS) — a hint for Whisper, joining the sentence. */
+  dictation_context: boolean;
   /** Model for transcription after recording and for imports. */
   meeting_engine: EngineId;
   /** Live transcription model. */
