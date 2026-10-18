@@ -42,6 +42,8 @@
   "common.show_logs": "Pokaż logi",
   "dictation.autostart": "Uruchamiaj Dyktando X po zalogowaniu",
   "dictation.commands": "Polecenia w trakcie dyktowania",
+  "dictation.context": "Uwzględniaj tekst wokół kursora",
+  "dictation.context_hint": "Tylko macOS. Przy rozpoczęciu dyktowania Dyktando X czyta (lokalnie, nigdzie nie wysyła) fragment pola przed kursorem i za nim: Whisper dostaje go jako podpowiedź, a podyktowany tekst dopasowuje się do zdania — małą literą w środku zdania, ze spacją, bez kropki, gdy zdanie trwa dalej. Pola haseł są pomijane.",
   "dictation.history": "Zapisuj historię dyktowania (tekst i nagranie, tylko na tym komputerze) — w oknie Spotkania → Dyktowania",
   "dictation.hud": "Pokazuj dymek ze stanem nagrywania",
   "dictation.language": "Język dyktowania",

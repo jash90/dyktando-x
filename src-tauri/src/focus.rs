@@ -40,6 +40,15 @@ const NON_TEXT_ROLES: &[&str] = &[
     "DataItem", "TitleBar", "ScrollBar", "Spinner", "ProgressBar",
 ];
 
+/// The focused field's text split at the cursor — context for recognition and for joining the
+/// dictated text with what's already there (only the parts around the cursor are read).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct FieldText {
+    pub before: String,
+    pub selected: String,
+    pub after: String,
+}
+
 pub fn classify(s: &Snapshot) -> Focus {
     if s.nothing_focused {
         return Focus::NotEditable;
@@ -68,6 +77,12 @@ pub fn snapshot() -> Snapshot {
     platform::snapshot()
 }
 
+/// macOS only (Accessibility); None elsewhere, for password fields and when the app doesn't expose
+/// the text.
+pub fn field_text() -> Option<FieldText> {
+    platform::field_text()
+}
+
 pub fn should_paste() -> bool {
     let s = snapshot();
     let f = classify(&s);
@@ -79,6 +94,10 @@ pub fn should_paste() -> bool {
 mod platform {
     pub fn snapshot() -> super::Snapshot {
         super::Snapshot { failed: true, ..Default::default() }
+    }
+
+    pub fn field_text() -> Option<super::FieldText> {
+        None
     }
 }
 
@@ -130,5 +149,6 @@ mod live {
     fn focus_live() {
         let s = super::snapshot();
         println!("{s:?} → {:?}", super::classify(&s));
+        println!("{:?}", super::field_text());
     }
 }

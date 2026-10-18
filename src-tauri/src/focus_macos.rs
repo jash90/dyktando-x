@@ -15,6 +15,7 @@ extern "C" {
     fn AXUIElementIsAttributeSettable(el: AXUIElementRef, attr: CFStringRef, settable: *mut u8) -> i32;
     fn AXUIElementSetMessagingTimeout(el: AXUIElementRef, seconds: f32) -> i32;
     fn AXUIElementGetPid(el: AXUIElementRef, pid: *mut i32) -> i32;
+    fn AXValueGetValue(value: CFTypeRef, kind: u32, out: *mut c_void) -> u8;
 }
 
 #[link(name = "CoreFoundation", kind = "framework")]
@@ -24,6 +25,8 @@ extern "C" {
     fn CFStringGetTypeID() -> usize;
     fn CFStringCreateWithCString(alloc: CFTypeRef, s: *const c_char, encoding: u32) -> CFStringRef;
     fn CFStringGetCString(s: CFStringRef, buf: *mut c_char, size: isize, encoding: u32) -> u8;
+    fn CFStringGetLength(s: CFStringRef) -> isize;
+    fn CFStringGetCharacters(s: CFStringRef, range: CFRange, buf: *mut u16);
     static kCFBooleanTrue: CFTypeRef;
 }
 
@@ -34,6 +37,17 @@ extern "C" {
 
 const UTF8: u32 = 0x0800_0100;
 const AX_ERROR_NO_VALUE: i32 = -25212;
+const AX_VALUE_CF_RANGE: u32 = 4;
+/// How much of the field around the cursor we read (UTF-16 units).
+const FIELD_BEFORE: isize = 2000;
+const FIELD_AFTER: isize = 500;
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct CFRange {
+    location: isize,
+    length: isize,
+}
 
 struct Owned(CFTypeRef);
 impl Drop for Owned {
@@ -66,53 +80,80 @@ unsafe fn string_attr(el: AXUIElementRef, name: &str) -> Option<String> {
         .then(|| std::ffi::CStr::from_ptr(buf.as_ptr()).to_string_lossy().into_owned())
 }
 
+/// `range` of a string attribute (UTF-16 units, clamped to its length).
+unsafe fn string_range(s: CFStringRef, start: isize, end: isize) -> String {
+    let len = CFStringGetLength(s);
+    let (start, end) = (start.clamp(0, len), end.clamp(0, len));
+    if end <= start {
+        return String::new();
+    }
+    let mut buf = vec![0u16; (end - start) as usize];
+    CFStringGetCharacters(s, CFRange { location: start, length: end - start }, buf.as_mut_ptr());
+    String::from_utf16_lossy(&buf)
+}
+
 fn app_path(pid: i32) -> Option<String> {
     let mut buf = vec![0u8; 4096];
     let n = unsafe { proc_pidpath(pid, buf.as_mut_ptr() as *mut c_void, buf.len() as u32) };
     (n > 0).then(|| String::from_utf8_lossy(&buf[..n as usize]).into_owned())
 }
 
+/// The focused application: its pid and element (with Electron's accessibility switched on).
+/// `Err(None)` = an empty reply, `Err(Some(code))` = an AX error.
+unsafe fn focused_app() -> Result<(i32, Owned), Option<i32>> {
+    let system = Owned(AXUIElementCreateSystemWide());
+    AXUIElementSetMessagingTimeout(system.0, 0.25);
+    let app = match copy_attr(system.0, "AXFocusedApplication") {
+        Ok(a) if !a.0.is_null() => a,
+        Ok(_) => return Err(None),
+        Err(e) => return Err(Some(e)),
+    };
+    let mut pid = 0;
+    AXUIElementGetPid(app.0, &mut pid);
+    let app_el = Owned(AXUIElementCreateApplication(pid));
+    AXUIElementSetMessagingTimeout(app_el.0, 0.25);
+    // Electron (Slack, VS Code, Discord…) builds the accessibility tree only on demand.
+    let manual = cfstr("AXManualAccessibility");
+    AXUIElementSetAttributeValue(app_el.0, manual.0, kCFBooleanTrue);
+    Ok((pid, app_el))
+}
+
+/// The focused UI element of the focused application (errors as in `focused_app`).
+unsafe fn focused_element(app_el: &Owned) -> Result<Owned, Option<i32>> {
+    let focused = match copy_attr(app_el.0, "AXFocusedUIElement") {
+        Ok(f) if !f.0.is_null() => f,
+        Ok(_) => return Err(None),
+        Err(e) => return Err(Some(e)),
+    };
+    AXUIElementSetMessagingTimeout(focused.0, 0.25);
+    Ok(focused)
+}
+
 pub fn snapshot() -> super::Snapshot {
     let mut snap = super::Snapshot::default();
+    let failed = |snap: &mut super::Snapshot, e: Option<i32>| {
+        snap.nothing_focused = e == Some(AX_ERROR_NO_VALUE);
+        snap.failed = e != Some(AX_ERROR_NO_VALUE);
+    };
     unsafe {
-        let system = Owned(AXUIElementCreateSystemWide());
-        AXUIElementSetMessagingTimeout(system.0, 0.25);
-        let app = match copy_attr(system.0, "AXFocusedApplication") {
-            Ok(a) if !a.0.is_null() => a,
-            Ok(_) => {
-                snap.failed = true;
-                return snap;
-            }
+        let (pid, app_el) = match focused_app() {
+            Ok(x) => x,
             Err(e) => {
-                snap.nothing_focused = e == AX_ERROR_NO_VALUE;
-                snap.failed = e != AX_ERROR_NO_VALUE;
+                failed(&mut snap, e);
                 return snap;
             }
         };
-        let mut pid = 0;
-        AXUIElementGetPid(app.0, &mut pid);
         // We recognize Finder by the executable path (without AppKit).
         if app_path(pid).is_some_and(|p| p.contains("/Finder.app/")) {
             snap.app = Some("com.apple.finder".into());
         }
-        let app_el = Owned(AXUIElementCreateApplication(pid));
-        AXUIElementSetMessagingTimeout(app_el.0, 0.25);
-        // Electron (Slack, VS Code, Discord…) builds the accessibility tree only on demand.
-        let manual = cfstr("AXManualAccessibility");
-        AXUIElementSetAttributeValue(app_el.0, manual.0, kCFBooleanTrue);
-        let focused = match copy_attr(app_el.0, "AXFocusedUIElement") {
-            Ok(f) if !f.0.is_null() => f,
-            Ok(_) => {
-                snap.failed = true;
-                return snap;
-            }
+        let focused = match focused_element(&app_el) {
+            Ok(f) => f,
             Err(e) => {
-                snap.nothing_focused = e == AX_ERROR_NO_VALUE;
-                snap.failed = e != AX_ERROR_NO_VALUE;
+                failed(&mut snap, e);
                 return snap;
             }
         };
-        AXUIElementSetMessagingTimeout(focused.0, 0.25);
         snap.role = string_attr(focused.0, "AXRole");
         let value = cfstr("AXValue");
         let mut settable = 0u8;
@@ -123,4 +164,32 @@ pub fn snapshot() -> super::Snapshot {
         snap.editable_ancestor = copy_attr(focused.0, "AXEditableAncestor").is_ok();
     }
     snap
+}
+
+/// The focused field's text around the cursor; None for password fields and elements without a
+/// text value or a cursor.
+pub fn field_text() -> Option<super::FieldText> {
+    unsafe {
+        let (_, app_el) = focused_app().ok()?;
+        let focused = focused_element(&app_el).ok()?;
+        let secure = |attr| string_attr(focused.0, attr).as_deref() == Some("AXSecureTextField");
+        if secure("AXRole") || secure("AXSubrole") {
+            return None;
+        }
+        let value = copy_attr(focused.0, "AXValue").ok()?;
+        if value.0.is_null() || CFGetTypeID(value.0) != CFStringGetTypeID() {
+            return None;
+        }
+        let range = copy_attr(focused.0, "AXSelectedTextRange").ok()?;
+        let mut sel = CFRange { location: 0, length: 0 };
+        if range.0.is_null() || AXValueGetValue(range.0, AX_VALUE_CF_RANGE, &mut sel as *mut CFRange as *mut c_void) == 0 {
+            return None;
+        }
+        let (start, end) = (sel.location, sel.location + sel.length.max(0));
+        Some(super::FieldText {
+            before: string_range(value.0, start - FIELD_BEFORE, start),
+            selected: string_range(value.0, start, end),
+            after: string_range(value.0, end, end + FIELD_AFTER),
+        })
+    }
 }

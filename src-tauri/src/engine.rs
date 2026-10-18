@@ -57,6 +57,24 @@ impl Engine {
         }
     }
 
+    /// Text before the cursor (Whisper continues it; the other models can't use it); None = none.
+    pub fn set_context(&mut self, context: Option<&str>) {
+        if let Model::Whisper(w) = &mut self.model {
+            w.set_context(context);
+        }
+    }
+
+    /// Whether the model continues the text before the cursor itself (Whisper), so it chooses the
+    /// case of the first word.
+    pub fn sees_context(&self) -> bool {
+        matches!(self.model, Model::Whisper(_))
+    }
+
+    /// Whether the vocabulary has this term (spelled exactly so).
+    pub fn has_term(&self, word: &str) -> bool {
+        self.vocabulary.has_term(word)
+    }
+
     /// Whether the model can transcribe these languages (whisper.cpp codes; empty = detects the language
     /// itself, several = mixed-language conversation). Checked before loading the model.
     pub fn check_languages(id: EngineId, languages: &[String]) -> Result<()> {

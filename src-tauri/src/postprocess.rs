@@ -1,5 +1,6 @@
 //! Dictation postprocessing (a port of `Postprocess/` from the Swift version): dictation markers →
 //! period at the end of a longer utterance → capitalization after sentences → whitespace cleanup.
+//! With the field's text around the cursor (`apply_in`) the dictation is also joined with it.
 
 const RULES: &[(&str, &str)] = &[
     ("kropka", "."),
@@ -76,6 +77,78 @@ pub fn apply(raw: &str) -> String {
     smart_space(&capitalize(&punctuate(&replace_markers(raw))))
 }
 
+/// The field's text around the cursor where the dictation goes (see `focus::FieldText`).
+pub struct Around<'a> {
+    pub before: &'a str,
+    pub after: &'a str,
+}
+
+/// Whether the text before the cursor ends in the middle of a sentence.
+fn mid_sentence(before: &str) -> bool {
+    if before.trim_end_matches([' ', '\t']).ends_with('\n') {
+        return false;
+    }
+    before.trim_end().chars().last().is_some_and(|c| !".!?…".contains(c))
+}
+
+/// The first word in lowercase — unless it's a name (`keep`), an abbreviation ("NPaw", "API") or "I".
+fn lowercase_first(text: &str, keep: impl Fn(&str) -> bool) -> String {
+    let word = text.split_whitespace().next().unwrap_or("");
+    let core = word.trim_matches(|c: char| !c.is_alphanumeric());
+    let mut chars = core.chars();
+    let Some(first) = chars.next() else { return text.to_string() };
+    let rest_lower = chars.all(|c| !c.is_uppercase());
+    if !first.is_uppercase() || !rest_lower || core == "I" || keep(core) {
+        return text.to_string();
+    }
+    let at = text.find(first).expect("the first letter is in the text");
+    format!("{}{}{}", &text[..at], first.to_lowercase(), &text[at + first.len_utf8()..])
+}
+
+/// For `join`'s `keep` with a model that saw the context (Whisper): whether the model itself wrote
+/// the first word so — `apply` capitalizes it anyway, so only the raw text tells.
+pub fn written_so(raw: &str) -> impl Fn(&str) -> bool + '_ {
+    move |word| raw.trim_start().trim_start_matches(|c: char| !c.is_alphanumeric()).starts_with(word)
+}
+
+/// Like `apply`, joined with what's already in the field (see `join`).
+pub fn apply_in(raw: &str, around: &Around, keep: impl Fn(&str) -> bool) -> String {
+    join(&apply(raw), around, keep)
+}
+
+/// A postprocessed text joined with the field: in the middle of a sentence the first word stays
+/// lowercase (`keep` = leave this word as is: a name, or a model that saw the context and chose
+/// the case itself), no period when the sentence goes on after the cursor on the same line, a
+/// period before the next sentence, and spaces where the words would stick together.
+pub fn join(text: &str, around: &Around, keep: impl Fn(&str) -> bool) -> String {
+    let mut text = text.trim().to_string();
+    if text.is_empty() {
+        return text;
+    }
+    // What follows on the same line: lowercase goes on with this sentence, a capital starts the next.
+    let next = around.after.split('\n').next().unwrap_or("").trim_start().chars().next();
+    if next.is_some_and(|c| c.is_lowercase() || c.is_ascii_digit()) {
+        if let Some(t) = text.strip_suffix('.').filter(|t| !t.ends_with('.')) {
+            text = t.to_string();
+        }
+    } else if next.is_some_and(char::is_uppercase) && !mid_sentence(around.before) && !text.ends_with(['.', '!', '?', '…', ':']) {
+        // A capital after the cursor starts the next sentence — unless this one is in the middle of
+        // a sentence: then it's a name or "I" ("Wczoraj | Kasia przyszła").
+        text.push('.');
+    }
+    if mid_sentence(around.before) {
+        text = lowercase_first(&text, keep);
+    }
+    let opening = "([{„\"'«/-";
+    if around.before.chars().last().is_some_and(|c| !c.is_whitespace() && !opening.contains(c)) && text.starts_with(|c: char| c.is_alphanumeric() || "([{„\"«".contains(c)) {
+        text.insert(0, ' ');
+    }
+    if around.after.starts_with(char::is_alphanumeric) {
+        text.push(' ');
+    }
+    text
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -107,6 +180,47 @@ mod tests {
     #[test]
     fn new_paragraph_marker() {
         assert_eq!(apply("pierwszy nowy akapit drugi"), "Pierwszy\n\ndrugi");
+    }
+
+    fn joined(raw: &str, before: &str, after: &str) -> String {
+        apply_in(raw, &Around { before, after }, |w| w == "Kasia")
+    }
+
+    #[test]
+    fn continues_the_sentence_before_the_cursor() {
+        assert_eq!(joined("Jutro o dziesiątej", "Spotkanie mamy", ""), " jutro o dziesiątej");
+        assert_eq!(joined("Kasia też będzie", "Na spotkaniu,", ""), " Kasia też będzie");
+        assert_eq!(joined("NPaw działa", "Sprawdziłem i", ""), " NPaw działa");
+        assert_eq!(joined("Nowe zdanie tutaj", "Koniec.", ""), " Nowe zdanie tutaj");
+        assert_eq!(joined("Nowe zdanie", "Lista:\n", ""), "Nowe zdanie");
+        assert_eq!(joined("Początek", "", ""), "Początek");
+        assert_eq!(joined("w nawiasie", "(", ""), "w nawiasie");
+    }
+
+    #[test]
+    fn no_period_when_the_sentence_goes_on_after_the_cursor() {
+        assert_eq!(joined("Bardzo ważny i pilny raport z całego tygodnia", "To jest", "do przeczytania."), " bardzo ważny i pilny raport z całego tygodnia ");
+        assert_eq!(joined("Raport.", "", " dla zespołu"), "Raport");
+        assert_eq!(joined("to jest dość długie zdanie bez kropki", "", ""), "To jest dość długie zdanie bez kropki.");
+    }
+
+    #[test]
+    fn keeps_the_period_before_the_next_sentence_or_line() {
+        assert_eq!(joined("Nowe zdanie", "Raport. ", "Następne zdanie."), "Nowe zdanie. ");
+        assert_eq!(joined("Nowe zdanie", "Raport. ", " Następne zdanie."), "Nowe zdanie.");
+        assert_eq!(joined("Nowe zdanie tutaj teraz i jutro", "Koniec.", "\nDruga linia"), " Nowe zdanie tutaj teraz i jutro.");
+        // In the middle of a sentence a capital after the cursor is a name, not the next sentence.
+        assert_eq!(joined("po pracy", "Wczoraj ", "Kasia przyszła."), "po pracy ");
+        // Text on the next line doesn't continue this sentence, whatever its case.
+        assert_eq!(joined("Nowe zdanie tutaj teraz i jutro", "Koniec.", "\nponiżej lista"), " Nowe zdanie tutaj teraz i jutro.");
+    }
+
+    #[test]
+    fn a_model_that_saw_the_context_keeps_its_case() {
+        let around = Around { before: "Spotkanie mamy", after: "" };
+        assert_eq!(apply_in("Tomek przyjdzie", &around, written_so("Tomek przyjdzie")), " Tomek przyjdzie");
+        assert_eq!(apply_in("jutro rano", &around, written_so("jutro rano")), " jutro rano");
+        assert_eq!(apply_in("„Jutro rano", &around, written_so("„Jutro rano")), " „Jutro rano");
     }
 
     #[test]

@@ -76,6 +76,11 @@ export default function DictationPane({ settings, update }: PaneProps) {
           <input type="checkbox" checked={settings.dictation_history} onChange={(e) => update({ dictation_history: e.target.checked })} />
           {t("dictation.history")}
         </label>
+        <label>
+          <input type="checkbox" checked={settings.dictation_context} onChange={(e) => update({ dictation_context: e.target.checked })} />
+          {t("dictation.context")}
+        </label>
+        <p className="hint">{t("dictation.context_hint")}</p>
         <AutostartToggle />
       </div>
       <h2>{t("dictation.commands")}</h2>
