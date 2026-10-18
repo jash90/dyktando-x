@@ -1,6 +1,6 @@
 //! Dictation postprocessing (a port of `Postprocess/` from the Swift version): dictation markers →
 //! period at the end of a longer utterance → capitalization after sentences → whitespace cleanup.
-//! With the field's text around the cursor (`apply_in`) the dictation is also joined with it.
+//! With the field's text around the cursor (`join`) the dictation is also joined with it.
 
 const RULES: &[(&str, &str)] = &[
     ("kropka", "."),
@@ -111,11 +111,6 @@ pub fn written_so(raw: &str) -> impl Fn(&str) -> bool + '_ {
     move |word| raw.trim_start().trim_start_matches(|c: char| !c.is_alphanumeric()).starts_with(word)
 }
 
-/// Like `apply`, joined with what's already in the field (see `join`).
-pub fn apply_in(raw: &str, around: &Around, keep: impl Fn(&str) -> bool) -> String {
-    join(&apply(raw), around, keep)
-}
-
 /// A postprocessed text joined with the field: in the middle of a sentence the first word stays
 /// lowercase (`keep` = leave this word as is: a name, or a model that saw the context and chose
 /// the case itself), no period when the sentence goes on after the cursor on the same line, a
@@ -183,7 +178,7 @@ mod tests {
     }
 
     fn joined(raw: &str, before: &str, after: &str) -> String {
-        apply_in(raw, &Around { before, after }, |w| w == "Kasia")
+        join(&apply(raw), &Around { before, after }, |w| w == "Kasia")
     }
 
     #[test]
@@ -218,9 +213,10 @@ mod tests {
     #[test]
     fn a_model_that_saw_the_context_keeps_its_case() {
         let around = Around { before: "Spotkanie mamy", after: "" };
-        assert_eq!(apply_in("Tomek przyjdzie", &around, written_so("Tomek przyjdzie")), " Tomek przyjdzie");
-        assert_eq!(apply_in("jutro rano", &around, written_so("jutro rano")), " jutro rano");
-        assert_eq!(apply_in("„Jutro rano", &around, written_so("„Jutro rano")), " „Jutro rano");
+        let joined = |raw: &str| join(&apply(raw), &around, written_so(raw));
+        assert_eq!(joined("Tomek przyjdzie"), " Tomek przyjdzie");
+        assert_eq!(joined("jutro rano"), " jutro rano");
+        assert_eq!(joined("„Jutro rano"), " „Jutro rano");
     }
 
     #[test]

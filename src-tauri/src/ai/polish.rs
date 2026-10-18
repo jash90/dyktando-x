@@ -66,24 +66,30 @@ fn clean(answer: &str) -> &str {
     a
 }
 
-/// Whether the answer is a correction of the text: most words the same (or near the same).
+/// Whether the answer is a correction of the text: few word edits (at most 30%, at least one) and
+/// at least half of the dictated words kept, the same or near the same. Short dictations are where
+/// a model most often answers instead ("Która godzina?" → "Jest 21:00.").
 pub fn is_correction(original: &str, answer: &str) -> bool {
     let words = |s: &str| s.split_whitespace().map(fold).filter(|w| !w.is_empty()).collect::<Vec<_>>();
     let (a, b) = (words(original), words(answer));
     if a.is_empty() || b.is_empty() {
         return false;
     }
-    // Word-level edit distance (a misheard name split or joined counts as up to two words).
-    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    let near = |wa: &Vec<char>, wb: &Vec<char>| wa == wb || levenshtein(wa, wb) * 3 <= wa.len().max(wb.len());
+    // Word-level edit distance (a misheard name split or joined counts as up to two words) and the
+    // number of dictated words kept in order.
+    let mut edits: Vec<usize> = (0..=b.len()).collect();
+    let mut kept = vec![0usize; b.len() + 1];
     for (i, wa) in a.iter().enumerate() {
-        let mut cur = vec![i + 1; b.len() + 1];
+        let (mut e, mut k) = (vec![i + 1; b.len() + 1], vec![0usize; b.len() + 1]);
         for (j, wb) in b.iter().enumerate() {
-            let near = wa == wb || levenshtein(wa, wb) * 3 <= wa.len().max(wb.len());
-            cur[j + 1] = (prev[j] + usize::from(!near)).min(prev[j + 1] + 1).min(cur[j] + 1);
+            let n = near(wa, wb);
+            e[j + 1] = (edits[j] + usize::from(!n)).min(edits[j + 1] + 1).min(e[j] + 1);
+            k[j + 1] = (kept[j] + usize::from(n)).max(kept[j + 1]).max(k[j]);
         }
-        prev = cur;
+        (edits, kept) = (e, k);
     }
-    prev[b.len()] <= (a.len() * 3 / 10).max(2)
+    edits[b.len()] <= (a.len() * 3 / 10).max(1) && kept[b.len()] * 2 >= a.len()
 }
 
 /// The corrected text, or the dictation itself when the answer isn't a correction of it.
@@ -140,6 +146,14 @@ mod tests {
         let text = "No więc chciałem tylko powiedzieć, że raport będzie jutro rano";
         assert_eq!(run("Raport dostarczę jutro.", text), text);
         assert_eq!(run("", "coś"), "coś");
+        // Short dictations: a reply is not a correction.
+        assert_eq!(run("Jest 21:00.", "Która godzina?"), "Która godzina?");
+        assert_eq!(run("Proszę bardzo!", "Dzięki"), "Dzięki");
+        assert_eq!(run("Proszę.", "Dzięki"), "Dzięki");
+        // Two of four words swapped for others is a rewrite.
+        assert_eq!(run("Wyślij to dzisiaj wieczorem.", "Wyślij to jutro rano"), "Wyślij to jutro rano");
+        // …while a real fix of a short one still goes through.
+        assert_eq!(run("Dzięki, NPaw.", "dzięki en paw"), "Dzięki, NPaw.");
     }
 
     #[test]

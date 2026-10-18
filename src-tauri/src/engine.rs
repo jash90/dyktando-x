@@ -84,11 +84,6 @@ impl Engine {
         self.active.prompt()
     }
 
-    /// Whether the vocabulary has this term (spelled exactly so).
-    pub fn has_term(&self, word: &str) -> bool {
-        self.active.has_term(word)
-    }
-
     /// Whether the model can transcribe these languages (whisper.cpp codes; empty = detects the language
     /// itself, several = mixed-language conversation). Checked before loading the model.
     pub fn check_languages(id: EngineId, languages: &[String]) -> Result<()> {
